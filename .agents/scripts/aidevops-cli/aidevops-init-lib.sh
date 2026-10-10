@@ -1625,8 +1625,16 @@ _init_optional_scaffolding() {
 			'.initialized_repos // [] | map(select(.slug == $s)) | if length > 0 then .[0].local_only // false else false end' \
 			"$HOME/.config/aidevops/repos.json" 2>/dev/null || echo "false")
 
+		# Skip when another workflow already calls the reusable metrics workflow (GH#34276).
+		local _existing_caller=""
+		if [[ ! -f "$_wf_dest" ]]; then
+			_existing_caller=$(_init_find_metrics_caller "$project_root") || _existing_caller=""
+		fi
+
 		# Install repo metrics refresh workflow for repos that can run GitHub Actions.
-		if [[ "$_is_local_only" != "true" && -f "$_wf_template" && ! -f "$_wf_dest" ]]; then
+		if [[ -n "$_existing_caller" ]]; then
+			print_info "Skipping loc-badge.yml: metrics caller already present: $_existing_caller"
+		elif [[ "$_is_local_only" != "true" && -f "$_wf_template" && ! -f "$_wf_dest" ]]; then
 			mkdir -p "$project_root/.github/workflows"
 			cp "$_wf_template" "$_wf_dest"
 			print_success "Installed .github/workflows/loc-badge.yml (repo metrics refresh workflow)"
@@ -1686,6 +1694,21 @@ _init_optional_scaffolding() {
 	_init_security_and_registration || return 1
 	_init_offer_release_verification "$repo_slug"
 	return 0
+}
+
+# Print the basename of a workflow with a non-comment `uses:` of
+# loc-badge-reusable.yml; return 1 when none exists (GH#34276).
+_init_find_metrics_caller() {
+	local project_root="$1"
+	local wf_file
+	for wf_file in "$project_root"/.github/workflows/*.yml "$project_root"/.github/workflows/*.yaml; do
+		[[ -f "$wf_file" ]] || continue
+		if grep -Eq '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*[^#[:space:]]*loc-badge-reusable\.yml' "$wf_file" 2>/dev/null; then
+			printf '%s\n' "${wf_file##*/}"
+			return 0
+		fi
+	done
+	return 1
 }
 
 _init_offer_release_verification() {
