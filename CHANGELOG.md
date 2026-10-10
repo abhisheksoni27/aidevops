@@ -10,6 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.1] - 2026-10-10
+
+### Changed
+
+- Maintenance: mark t18648 complete (pr:#34284 completed:2026-10-10) (#34283)
+- Maintenance: mark t18647 complete (pr:#34275 completed:2026-10-10) (#34272)
+- Documentation: self-hosted runners guide covers CI_RUNNER and Free-plan org variables
+- Maintenance: sync GitHub issue refs to TODO.md (#34274)
+- Maintenance: mark t18633 complete (pr:#34154 completed:2026-10-10) (#34262)
+
+### Fixed
+
+- detect listeners when lsof is incomplete
+- skip loc-badge.yml install when a metrics caller exists (#34279)
+- classify verified repository transfer drift as a pre-claim dispatch prerequisite
+- tolerate legacy planning metadata
+- route OpenCode hardcoded commands per execution model instead of defaulting to subtask (#34270)
+- ignore commented uses: lines when reading and rewriting caller refs
+- judge skip-if-fresh by generated_at, not file mtime
+- recognise blocked-by:GH#NNN labels so closed blockers unblock issues
+- disable custom tools without real schemas (#34154)
+- normalize affected-host reproduction blockers (GH#34259) (#34260)
+
 ## [3.39.0] - 2026-10-10
 
 ### Added
