@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.7] - 2026-10-11
+
+### Fixed
+
+- bound explicit For/Ref targets to the declaration clause
+- expose dispatch and repo-cap outcomes (#34334)
+
 ## [3.39.6] - 2026-10-11
 
 ### Changed
