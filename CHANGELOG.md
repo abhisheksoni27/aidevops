@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.21] - 2026-10-11
+
+### Changed
+
+- Maintenance: mark t18674 complete (pr:#34423 completed:2026-10-11) (#34431)
+- Tests: make min-concurrency suite independent of host CPU load (#34436)
+- Maintenance: mark t18673 complete (pr:#34404 completed:2026-10-11) (#34407)
+
+### Fixed
+
+- scan private origin/main tree instead of git-pulling guarded canonical checkout (#34442)
+- revisit expired merged-partial continuation leases (#34440)
+- unblock dependency-free release pushes and reconcile-required lanes
+- configurable secret-check timeout, default 15s (GH#34427) (#34435)
+- stop every worker launch scanning the whole temp root with du before model selection
+
 ## [3.39.20] - 2026-10-11
 
 ### Added
