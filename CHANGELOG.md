@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.15] - 2026-10-11
+
+### Changed
+
+- Maintenance: mark t18668 complete (pr:#34374 completed:2026-10-11) (#34375)
+
+### Fixed
+
+- stop footprint extraction turning EDIT/NEW prose and template placeholders into shared file claims
+- status never counts auth-error accounts as available
+
 ## [3.39.14] - 2026-10-11
 
 ### Changed
