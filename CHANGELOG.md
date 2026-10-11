@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.17] - 2026-10-11
+
+### Changed
+
+- Maintenance: mark t18670 complete (pr:#34386 completed:2026-10-11) (#34382)
+
+### Fixed
+
+- stop re-filing the .aidevops.json migration issue from a stale local index and an unmatched duplicate search
+
 ## [3.39.16] - 2026-10-11
 
 ### Changed
