@@ -26,10 +26,24 @@ import {
 } from "../quality-hooks-git-safety.mjs";
 import { validateBashWorkingDirectory } from "../quality-hooks-workdir.mjs";
 import { createQualityHooks } from "../quality-hooks.mjs";
+import { resolveTrustedExecutable } from "../../../scripts/trusted-executable.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const scriptsDir = join(here, "..", "..", "..", "scripts");
 const realGit = "/usr/bin/git";
+
+test("trusted JS and Python discovery preserve explicit PATH and symlink/.. components", () => {
+  for (const name of ["git", "python3"]) {
+    for (const searchPath of ["/bin/../bin", "/usr/bin", "", "relative"]) {
+      const expected = execFileSync("python3", [
+        "-c",
+        "import sys; sys.path.insert(0, sys.argv[1]); from trusted_executable import trusted_executable; print(trusted_executable(sys.argv[3], sys.argv[2]) or '/nonexistent/aidevops-untrusted-' + sys.argv[3])",
+        scriptsDir, searchPath, name,
+      ], { encoding: "utf8" }).trim();
+      assert.equal(resolveTrustedExecutable(name, searchPath), expected);
+    }
+  }
+});
 
 function setupRepo({ managed = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "aidevops-git-gate-"));
@@ -893,6 +907,7 @@ test("fails closed when required policy is malformed", () => {
     copyFileSync(join(scriptsDir, "canonical-git-command-guard.py"), join(isolatedScripts, "canonical-git-command-guard.py"));
     // Shared PATH-based resolver imported by command_policy_evaluation.py.
     copyFileSync(join(scriptsDir, "trusted_executable.py"), join(isolatedScripts, "trusted_executable.py"));
+    copyFileSync(join(scriptsDir, "native_git.py"), join(isolatedScripts, "native_git.py"));
     writeFileSync(join(isolatedConfigs, "command-policy.json"), "{not-json\n");
     assert.throws(
       () => checkCommandSafetyGate("printf safe", isolatedScripts, process.cwd()),

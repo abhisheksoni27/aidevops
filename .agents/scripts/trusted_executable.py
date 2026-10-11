@@ -13,7 +13,9 @@ because it may only load its fixed, root-owned file set.
 from __future__ import annotations
 
 import os
+import re
 import stat
+import sys
 from pathlib import Path
 
 
@@ -38,6 +40,27 @@ def _trusted_chain(path: str) -> bool:
     return all(_root_controlled(str(parent), directory=True) for parent in current.parents)
 
 
+def _trusted_symlink_chain(path: str, hops: int = 0) -> bool:
+    """Check each link's containing chain, including intermediate link targets."""
+    if hops >= 40:
+        return False
+    parts = Path(path).parts
+    for index in range(1, len(parts) + 1):
+        prefix = Path(*parts[:index])
+        try:
+            status = prefix.lstat()
+            if stat.S_ISLNK(status.st_mode):
+                if status.st_uid != 0 or not _trusted_chain(str(prefix.parent)):
+                    return False
+                target = os.readlink(prefix)
+                if not os.path.isabs(target):
+                    target = os.path.join(str(prefix.parent), target)
+                return _trusted_symlink_chain(os.path.join(target, *parts[index:]), hops + 1)
+        except OSError:
+            return False
+    return _trusted_chain(path)
+
+
 def trusted_executable(name: str, search_path: str | None = None) -> str | None:
     """Return the first root-controlled ``name`` on PATH, or None.
 
@@ -45,6 +68,8 @@ def trusted_executable(name: str, search_path: str | None = None) -> str | None:
     emptied or hostile PATH cannot hide the system tool; trust is still decided
     by ownership, never by location.
     """
+    if not re.fullmatch(r"[A-Za-z0-9_.+-]+", name) or name in {".", ".."}:
+        return None
     if search_path is None:
         search_path = os.pathsep.join(filter(None, (os.environ.get("PATH"), os.defpath)))
     for directory in search_path.split(os.pathsep):
@@ -61,7 +86,8 @@ def trusted_executable(name: str, search_path: str | None = None) -> str | None:
         if not (_root_controlled(os.path.dirname(real), directory=False)
                 and _root_controlled(real_directory, directory=False)):
             continue
-        if _trusted_chain(real) and _trusted_chain(real_directory):
+        if (_trusted_symlink_chain(candidate) and _trusted_chain(real)
+                and _trusted_chain(real_directory)):
             return candidate
     return None
 
@@ -72,3 +98,24 @@ def require_trusted_executable(name: str) -> str:
     if resolved is None:
         raise FileNotFoundError(f"no root-controlled {name} found on PATH")
     return resolved
+
+
+def main() -> int:
+    """CLI: 1 unavailable, 2 invalid arguments, 3 untrusted interpreter."""
+    if (len(sys.argv) not in {2, 3}
+            or not re.fullmatch(r"[A-Za-z0-9_.+-]+", sys.argv[1])
+            or sys.argv[1] in {".", ".."}):
+        return 2
+    interpreter = os.path.realpath(sys.executable)
+    if (not _trusted_symlink_chain(sys.executable)
+            or not _root_controlled(os.path.dirname(interpreter), directory=False)):
+        return 3
+    resolved = trusted_executable(sys.argv[1], sys.argv[2] if len(sys.argv) == 3 else None)
+    if resolved is None:
+        return 1
+    print(resolved)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
