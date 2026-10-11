@@ -396,11 +396,21 @@ _dispatch_cache_confirmed_block() {
 	return 0
 }
 
+# Record an unlaunched dispatch_with_dedup result for one candidate.
+# Args: candidate JSON, issue, repo slug, dispatch rc
+# Returns: _DISPATCH_CYCLE_BUDGET_DEFER_RC for a deferral, else 1 (skipped)
 _dispatch_record_and_cache_block() {
 	local candidate="$1" issue="$2" repo="$3" rc="$4"
+	if [[ "$rc" -eq "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}" ]]; then
+		# GH#34428: no stage ran. Drop this attempt's recency stamp and skip
+		# failure classification, so the candidate keeps its ranking and no
+		# fast-fail, backoff, timeout or launch-failure evidence is recorded.
+		_dispatch_attempt_recency_clear "$issue" "$repo"
+		return "$rc"
+	fi
 	_dispatch_record_nonzero_dispatch_result "$issue" "$repo" "$rc" "$candidate"
 	_dispatch_cache_confirmed_block "$candidate" "$issue" "$repo"
-	return 0
+	return 1
 }
 
 _dispatch_compute_capacity() {
@@ -612,18 +622,10 @@ _dispatch_process_candidate() {
 	_dispatch_attempt_recency_stamp "$issue_number" "$repo_slug" "$attempt_epoch" # GH#34363
 	_dispatch_with_timeout "$issue_number" "$repo_slug" "$dispatch_title" "$issue_title" \
 		"$self_login" "$repo_path" "$prompt" "issue-${issue_number}" "$model_override" || dispatch_rc=$?
-	if [[ "$dispatch_rc" -eq "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}" ]]; then
-		# GH#34428: no stage ran. Drop this attempt's reservations and recency
-		# stamp, and skip failure classification so the candidate keeps its
-		# ranking and no fast-fail/backoff/timeout evidence is recorded.
-		_dispatch_release_attempt_reservations "$repo_slug" "$issue_number" "$attempt_epoch"
-		_dispatch_attempt_recency_clear "$issue_number" "$repo_slug"
-		return "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}"
-	fi
 	if [[ "$dispatch_rc" -ne 0 ]]; then
 		_dispatch_release_attempt_reservations "$repo_slug" "$issue_number" "$attempt_epoch"
 		_dispatch_record_and_cache_block "$candidate_json" "$issue_number" "$repo_slug" "$dispatch_rc"
-		return 1
+		return $?
 	fi
 
 	# Count every successful dispatch attempt as a round denominator (t1959)
