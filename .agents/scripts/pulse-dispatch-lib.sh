@@ -102,6 +102,7 @@ _DISPATCH_THROTTLE_CLEARED=0
 _DISPATCH_TRIAGE_OUTCOME_SCHEMA="aidevops.pulse-triage-outcome/v1"
 _DISPATCH_OUTCOME_SUCCESS="success"
 _DISPATCH_OUTCOME_FAILED="fail"
+_DISPATCH_OUTCOME_DEFERRED="defer"
 _DISPATCH_PRIORITY_PRODUCT="product"
 _DISPATCH_ELIGIBILITY_INELIGIBLE="ineligible"
 _DISPATCH_VALUE_UNKNOWN="unknown"
@@ -611,6 +612,14 @@ _dispatch_process_candidate() {
 	_dispatch_attempt_recency_stamp "$issue_number" "$repo_slug" "$attempt_epoch" # GH#34363
 	_dispatch_with_timeout "$issue_number" "$repo_slug" "$dispatch_title" "$issue_title" \
 		"$self_login" "$repo_path" "$prompt" "issue-${issue_number}" "$model_override" || dispatch_rc=$?
+	if [[ "$dispatch_rc" -eq "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}" ]]; then
+		# GH#34428: no stage ran. Drop this attempt's reservations and recency
+		# stamp, and skip failure classification so the candidate keeps its
+		# ranking and no fast-fail/backoff/timeout evidence is recorded.
+		_dispatch_release_attempt_reservations "$repo_slug" "$issue_number" "$attempt_epoch"
+		_dispatch_attempt_recency_clear "$issue_number" "$repo_slug"
+		return "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}"
+	fi
 	if [[ "$dispatch_rc" -ne 0 ]]; then
 		_dispatch_release_attempt_reservations "$repo_slug" "$issue_number" "$attempt_epoch"
 		_dispatch_record_and_cache_block "$candidate_json" "$issue_number" "$repo_slug" "$dispatch_rc"
@@ -801,6 +810,7 @@ _dispatch_floor_loop() {
 # Each candidate's outcome line format:
 #   success|<issue>           — dispatched + launch validated
 #   fail|<issue>|rc=<n>|<reason>  — pre-skip, dispatch failure, or launch failure
+#   defer|<issue>|rc=75|reason=cycle_budget_floor — stage not started (GH#34428)
 #
 # Arguments:
 #   $1 - candidate_file
@@ -1068,6 +1078,11 @@ _dispatch_record_candidate_outcome() {
 	[[ "$eligibility" == ineligible ]] || eligibility=unknown
 	if [[ "$result_code" -eq 0 ]]; then
 		printf 'success|%s|repo=%s|priority=%s\n' "$issue_num" "$repo_slug" "$priority" >>"$outcomes_file" || return 1
+	elif [[ "$result_code" -eq "${_DISPATCH_CYCLE_BUDGET_DEFER_RC:-75}" ]]; then
+		# GH#34428: a deferral is neither a launch nor a failure, so it stays
+		# out of the round's throttle denominator and product-unknown counts.
+		printf '%s|%s|rc=%d|reason=cycle_budget_floor|repo=%s|priority=%s\n' \
+			"$_DISPATCH_OUTCOME_DEFERRED" "$issue_num" "$result_code" "$repo_slug" "$priority" >>"$outcomes_file" || return 1
 	else
 		printf 'fail|%s|rc=%d|reason=%s|repo=%s|priority=%s|eligibility=%s\n' \
 			"$issue_num" "$result_code" "${_PULSE_LAST_LAUNCH_FAILURE:-none}" "$repo_slug" "$priority" "$eligibility" >>"$outcomes_file" || return 1
@@ -1214,7 +1229,8 @@ _dispatch_priority_loop() {
 	done
 	read -r product_launched product_unknown < <(_dispatch_priority_product_outcomes "$outcomes")
 	processed=$(awk -F'|' -v succeeded="$_DISPATCH_OUTCOME_SUCCESS" -v failed="$_DISPATCH_OUTCOME_FAILED" \
-		'$1 == succeeded || $1 == failed { n++ } END { print n+0 }' "$outcomes")
+		-v deferred="$_DISPATCH_OUTCOME_DEFERRED" \
+		'$1 == succeeded || $1 == failed || $1 == deferred { n++ } END { print n+0 }' "$outcomes")
 	((held <= budget - launched)) || held=$((budget - launched))
 	echo "[pulse-wrapper] PRIORITY_RESERVATION requested=${reserved} product_launched=${product_launched} held=${held} discovery_complete=${complete} launched=${launched}" >>"$LOGFILE"
 	rm -rf "$phase_dir"
