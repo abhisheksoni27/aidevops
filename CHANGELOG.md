@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.6] - 2026-10-11
+
+### Changed
+
+- Tests: tolerate host load in bounded-operation restoration (#34333)
+- Maintenance: mark t18656 complete (pr:#34325 completed:2026-10-11) (#34327)
+
+### Fixed
+
+- recover first-wave capacity lost to timed-out sentinel stages and single-repo first waves
+
 ## [3.39.5] - 2026-10-11
 
 ### Fixed
