@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.8] - 2026-10-11
+
+### Changed
+
+- Maintenance: mark t18660 complete (pr:#34339 completed:2026-10-11) (#34336)
+
+### Fixed
+
+- keep dependants blocked while a superseded blocker's successor is open
+
 ## [3.39.7] - 2026-10-11
 
 ### Fixed
