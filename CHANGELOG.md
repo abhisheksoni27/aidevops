@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.22] - 2026-10-12
+
+### Changed
+
+- Maintenance: mark t18583 complete (pr:#34448 completed:2026-10-11) (#34449)
+
+### Fixed
+
+- stop setup reconciliation killing in-flight Pulse cycles on every deploy
+- defer candidate stages below the ceremony floor (#34451)
+- treat unconfigured required status checks as verified no-required in merge fallback (#34444)
+- honour core.hooksPath in hook installers and let pre-push managers coexist (GH#34411) (#34443)
+
 ## [3.39.21] - 2026-10-11
 
 ### Changed
