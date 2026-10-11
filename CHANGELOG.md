@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.5] - 2026-10-11
+
+### Fixed
+
+- preserve delegated exit status in --command router
+
 ## [3.39.4] - 2026-10-11
 
 ### Changed
