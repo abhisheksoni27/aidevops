@@ -30,7 +30,10 @@ from hosting_fleet_inventory import (  # noqa: E402
     load_network_map,
     probe_roots,
 )
-from hosting_fleet_plan import CLEAN_STATES, build_plan  # noqa: E402
+from hosting_fleet_plan import (  # noqa: E402
+    CLEAN_STATES, build_plan,
+)
+from hosting_fleet_privacy import config_pairs, fleet_entities, merge_private_entities  # noqa: E402
 from hosting_fleet_remote import API_BASE, discover_networks, fetch_websites  # noqa: E402
 from repo_layout_migrate import (  # noqa: E402
     MigrationError,
@@ -116,6 +119,7 @@ def inventory_command(args: argparse.Namespace) -> int:
           + f" accounts={len(inventory['accounts'])}"
           + f" network_discovery={inventory['network_discovery']}")
     print(f"inventory_sha256: {inventory['inventory_sha256']}")
+    sync_privacy(inventory, args.config)
     return 0
 
 
@@ -134,12 +138,24 @@ def load_fleet_config(path_value: str) -> dict[str, Any]:
     return config
 
 
-def config_pairs(config: dict[str, Any], key: str) -> list[str]:
-    """Convert a config mapping into the DOMAIN=VALUE form the CLI accepts."""
-    mapping = config.get(key) or {}
-    if not isinstance(mapping, dict):
-        raise FleetError(f"Fleet config '{key}' must be an object")
-    return [f"{name}={value}" for name, value in sorted(mapping.items())]
+def sync_privacy(inventory: dict[str, Any], config_path: str) -> None:
+    """Update the local guard, reporting counts only even on failure."""
+    try:
+        entities = fleet_entities(inventory, load_fleet_config(config_path))
+        added = merge_private_entities(entities)
+    except (FleetError, MigrationError, OSError, ValueError, KeyError, TypeError) as exc:
+        raise FleetError("Privacy sync failed; check private inventory, config and entity file") from exc
+    print(f"Privacy sync: selected={len(entities)} added={added}")
+
+
+def privacy_sync_command(args: argparse.Namespace) -> int:
+    """Sync a previously saved inventory without hosting or GitHub requests."""
+    try:
+        inventory = load_inventory(expand_path(args.inventory))
+    except (FleetError, MigrationError, OSError, ValueError) as exc:
+        raise FleetError("Privacy sync failed; check private inventory") from exc
+    sync_privacy(inventory, args.config)
+    return 0
 
 
 def merged_options(args: argparse.Namespace) -> dict[str, Any]:
@@ -210,6 +226,8 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     inventory = commands.add_parser("inventory")
     inventory.add_argument("--output")
+    inventory.add_argument("--config", default=DEFAULT_CONFIG,
+                           help="Private fleet config for the automatic privacy sync")
     inventory.add_argument("--username", help="Limit to one hosting account username")
     inventory.add_argument("--network-map", help="JSON object: blog domain -> primary domain")
     inventory.add_argument("--discover-networks", action="store_true",
@@ -218,6 +236,10 @@ def build_parser() -> argparse.ArgumentParser:
     inventory.add_argument("--api-response", help="Use a saved websites response (offline)")
     inventory.add_argument("--api-base", default=API_BASE)
     inventory.set_defaults(handler=inventory_command)
+    privacy = commands.add_parser("privacy-sync", help="Sync fleet names to the local privacy guard")
+    privacy.add_argument("--inventory", default=f"{DEFAULT_STATE_DIR}/inventory.json")
+    privacy.add_argument("--config", default=DEFAULT_CONFIG)
+    privacy.set_defaults(handler=privacy_sync_command)
     plan = commands.add_parser("plan")
     add_plan_arguments(plan)
     plan.add_argument("--output")
