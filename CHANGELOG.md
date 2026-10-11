@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.12] - 2026-10-11
+
+### Changed
+
+- Documentation: record GH#34361 worker exit audit investigation (#34362)
+- Maintenance: mark t18664 complete (pr:#34358 completed:2026-10-11) (#34359)
+
+### Fixed
+
+- rotate dispatch attempts past repeatedly blocked head candidates
+
 ## [3.39.11] - 2026-10-11
 
 ### Changed
