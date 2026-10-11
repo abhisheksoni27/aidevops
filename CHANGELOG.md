@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.9] - 2026-10-11
+
+### Fixed
+
+- reset cost budget before meta recovery releases dispatch (#34350)
+- release dependency-ready issues held only by brief terminal-blocker text
+
 ## [3.39.8] - 2026-10-11
 
 ### Changed
