@@ -54,24 +54,49 @@ function recoverMarked(snapshot, rootPid, owned, operationID) {
 
 function recordSnapshot(snapshot, rootPid, owned, operationID, nestedGroups) {
   recordOwnedDescendants(snapshot.entries, rootPid, owned, snapshot.psPid);
-  recoverMarked(snapshot, rootPid, owned, operationID);
-  recordOwnedDescendants(snapshot.entries, rootPid, owned, snapshot.psPid);
+  if (operationID) {
+    recoverMarked(snapshot, rootPid, owned, operationID);
+    recordOwnedDescendants(snapshot.entries, rootPid, owned, snapshot.psPid);
+  }
   for (const entry of snapshot.entries) {
     if (entry.pgid !== rootPid && isOwned(owned, entry)) nestedGroups.add(entry.pgid);
   }
+}
+
+// The marker scan reads every process environment (`ps axeww` on macOS,
+// /proc/<pid>/environ on Linux); at the 250 ms tracking cadence it cost about
+// 0.4 CPU cores per running operation (GH#34324). Markers persist for a
+// process's lifetime, so periodic tracking scans on this cadence, while exit,
+// termination and drain decisions request a scan with `{ markers: true }`.
+export const MARKER_SCAN_INTERVAL_MS = 5000;
+
+// Returns the operation ID when a marker scan is due for this track() call,
+// otherwise "" so recordSnapshot() skips the environment scan.
+function createMarkerScanGate(operationID) {
+  let lastScanAt = null;
+  return (request) => {
+    const now = Date.now();
+    const due = Boolean(operationID)
+      && (request?.markers === true || lastScanAt === null || now - lastScanAt >= MARKER_SCAN_INTERVAL_MS);
+    if (due) lastScanAt = now;
+    return due ? operationID : "";
+  };
 }
 
 export function createProcessTreeTracker(rootPid, snapshotProcesses = processSnapshot, operationID = "") {
   const owned = new Map();
   const nestedGroups = new Set();
   let attributionComplete = true;
-  const track = () => {
+  const markerScanOperationID = createMarkerScanGate(operationID);
+  // Periodic timers call track() without a request; decision points pass
+  // { markers: true } so escaped marked processes are always recovered first.
+  const track = (request) => {
     const snapshot = snapshotProcesses();
     if (!snapshot) {
       attributionComplete = false;
       return null;
     }
-    recordSnapshot(snapshot, rootPid, owned, operationID, nestedGroups);
+    recordSnapshot(snapshot, rootPid, owned, markerScanOperationID(request), nestedGroups);
     return snapshot;
   };
   return {
