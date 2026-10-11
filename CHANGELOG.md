@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.16] - 2026-10-11
+
+### Changed
+
+- Maintenance: sync GitHub issue refs to TODO.md (#34384)
+
+### Fixed
+
+- an open PR with over 100 changed files must not make the open-siblings lookup permanently uncertain
+
 ## [3.39.15] - 2026-10-11
 
 ### Changed
