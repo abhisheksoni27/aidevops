@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.3] - 2026-10-11
+
+### Changed
+
+- Maintenance: mark t18629 complete (pr:#34307 completed:2026-10-11) (#34310)
+
+### Fixed
+
+- return merged non-closing worker partials to the dispatch queue
+- follow shared CAS fetch stdout isolation (#34316)
+
 ## [3.39.2] - 2026-10-11
 
 ### Added
