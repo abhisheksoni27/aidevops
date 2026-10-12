@@ -39,6 +39,9 @@ _LFG_SURGICAL_EXEMPTED_FILES=""
 _LFG_FOUND_LARGE=false
 _LFG_LARGE_FILES=""
 _LFG_LARGE_FILE_PATHS=""
+# Pinned measurement source, populated only after all lagging-mirror targets
+# have been verified. Reset per candidate so another repository cannot reuse it.
+_LFG_REMOTE_MEASUREMENT_SHA=""
 
 #######################################
 # Label-based early-exit precheck for the large-file gate.
@@ -220,17 +223,19 @@ _large_file_gate_extract_paths() {
 # (checking bare, .agents/, and .-prefixed variants), handles single-line
 # and scoped-range citations, then compares `wc -l` to LARGE_FILE_LINE_THRESHOLD.
 #
-# Arguments: raw_target, repo_path, issue_number
+# Arguments: raw_target, repo_path, issue_number, optional pinned remote commit
 # Stdout: "fpath|line_count" when the file exceeds threshold (exit 0)
 # Exit codes:
 #   0 - file is large, output emitted on stdout
 #   1 - file is under threshold
 #   2 - target was skipped (invalid, missing, skip-pattern, single-line, scoped-range)
+#   3 - pinned remote measurement unavailable (defer the candidate)
 #######################################
 _large_file_gate_evaluate_target() {
 	local raw_target="$1"
 	local repo_path="$2"
 	local issue_number="$3"
+	local remote_sha="${4:-}"
 	[[ -n "$raw_target" ]] || return 2
 
 	# t2024: Parse optional line qualifier off the end of the target.
@@ -290,7 +295,18 @@ _large_file_gate_evaluate_target() {
 	fi
 
 	local line_count=0
-	line_count=$(wc -l <"$full_path" 2>/dev/null | tr -d ' ') || line_count=0
+	if [[ -n "$remote_sha" ]]; then
+		local entry="" mode="" object_type="" object_sha="" entry_path=""
+		entry=$(git -C "$repo_path" --literal-pathspecs ls-tree "$remote_sha" -- "${full_path#"${repo_path}/"}" 2>/dev/null) || return 3
+		[[ -n "$entry" && "$entry" != *$'\n'* ]] || return 3
+		read -r mode object_type object_sha entry_path <<<"$entry"
+		[[ "$mode" == "100644" || "$mode" == "100755" ]] || return 3
+		[[ "$object_type" == "blob" && -n "$object_sha" ]] || return 3
+		line_count=$(set -o pipefail; git -C "$repo_path" cat-file blob "$object_sha" 2>/dev/null | wc -l | tr -d ' ') || return 3
+		[[ "$line_count" =~ ^[0-9]+$ ]] || return 3
+	else
+		line_count=$(wc -l <"$full_path" 2>/dev/null | tr -d ' ') || line_count=0
+	fi
 	if [[ "$line_count" -ge "$LARGE_FILE_LINE_THRESHOLD" ]]; then
 		printf '%s|%s\n' "$fpath" "$line_count"
 		return 0
@@ -358,7 +374,7 @@ _large_file_gate_remote_default_line_count() {
 }
 
 #######################################
-# Prove that measurements from a lagging mirror use the exact target bytes
+# Verify that measurements from a lagging mirror can use target blobs
 # from the pinned remote commit. This reads existing objects only: it neither
 # fetches per candidate nor modifies a checkout to recover dispatch capacity.
 #######################################
@@ -367,7 +383,7 @@ _large_file_gate_targets_match_remote_default() {
 	local remote_sha="$2"
 	local targets="$3"
 	local target="" full_path="" relative_path="" entry="" candidate=""
-	local mode="" object_type="" object_sha="" entry_path="" working_sha=""
+	local mode="" object_type="" object_sha="" entry_path=""
 	[[ -n "$targets" ]] || return 1
 	git -C "$repo_path" cat-file -e "${remote_sha}^{commit}" 2>/dev/null || return 1
 	while IFS= read -r target; do
@@ -390,15 +406,14 @@ _large_file_gate_targets_match_remote_default() {
 		read -r mode object_type object_sha entry_path <<<"$entry"
 		[[ "$mode" == "100644" || "$mode" == "100755" ]] || return 1
 		[[ "$object_type" == "blob" && -n "$object_sha" ]] || return 1
-		working_sha=$(git -C "$repo_path" hash-object --no-filters -- "$full_path" 2>/dev/null) || return 1
-		[[ "$working_sha" == "$object_sha" ]] || return 1
+		git -C "$repo_path" cat-file -e "${object_sha}^{blob}" 2>/dev/null || return 1
 	done <<<"$targets"
 	return 0
 }
 
 #######################################
 # Verify the remote default commit or, for a lagging mirror, every target's
-# exact bytes. Unrelated merged files must not strand otherwise eligible work.
+# pinned blob. Record the commit for measurement without changing mirror state.
 # Arguments: repo_path, optional newline-separated targets
 # Returns: 0 when measurements are current, 1 when stale or unverifiable
 #######################################
@@ -410,6 +425,7 @@ _large_file_gate_repo_matches_remote_default() {
 	local local_sha=""
 	local remote_line=""
 	local remote_sha=""
+	_LFG_REMOTE_MEASUREMENT_SHA=""
 
 	[[ -n "$repo_path" ]] || return 1
 	default_branch=$(git -C "$repo_path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || return 1
@@ -423,8 +439,9 @@ _large_file_gate_repo_matches_remote_default() {
 	remote_sha="${remote_line%%[[:space:]]*}"
 	[[ "$remote_sha" =~ ^[0-9a-fA-F]{40}$ ]] || return 1
 	[[ "$local_sha" == "$remote_sha" ]] && return 0
-	_large_file_gate_targets_match_remote_default "$repo_path" "$remote_sha" "$targets"
-	return $?
+	_large_file_gate_targets_match_remote_default "$repo_path" "$remote_sha" "$targets" || return 1
+	_LFG_REMOTE_MEASUREMENT_SHA="$remote_sha"
+	return 0
 }
 
 #######################################
@@ -1054,11 +1071,13 @@ _large_file_gate_issue_title() {
 #   $1 - all_paths (newline-separated, from _large_file_gate_extract_paths)
 #   $2 - repo_path
 #   $3 - issue_number
+#   $4 - optional pinned remote commit
 #######################################
 _large_file_gate_collect_large_files() {
 	local all_paths="$1"
 	local repo_path="$2"
 	local issue_number="$3"
+	local remote_sha="${4:-}"
 
 	_LFG_FOUND_LARGE=false
 	_LFG_LARGE_FILES=""
@@ -1068,7 +1087,8 @@ _large_file_gate_collect_large_files() {
 	while IFS= read -r raw_target; do
 		[[ -z "$raw_target" ]] && continue
 		eval_rc=0
-		eval_output=$(_large_file_gate_evaluate_target "$raw_target" "$repo_path" "$issue_number") || eval_rc=$?
+		eval_output=$(_large_file_gate_evaluate_target "$raw_target" "$repo_path" "$issue_number" "$remote_sha") || eval_rc=$?
+		[[ "$eval_rc" -ne 3 ]] || return 1
 		if [[ "$eval_rc" -eq 0 && -n "$eval_output" ]]; then
 			local _f="${eval_output%|*}" _c="${eval_output##*|}"
 			_LFG_FOUND_LARGE=true
@@ -1113,6 +1133,31 @@ _large_file_gate_issue_labels() {
 	fi
 
 	printf '%s' "$issue_labels"
+	return 0
+}
+
+# Measure verified targets without changing canonical state. Pulse requires a
+# current remote source; standalone callers retain local measurement behavior.
+# Arguments: all_paths, repo_path, issue_number, repo_slug
+# Returns: 0 when measured, 1 when safely deferred before any issue mutation
+_large_file_gate_measure_verified_targets() {
+	local all_paths="$1"
+	local repo_path="$2"
+	local issue_number="$3"
+	local repo_slug="$4"
+	_LFG_REMOTE_MEASUREMENT_SHA=""
+	if declare -F _pulse_refresh_repo >/dev/null 2>&1 \
+		&& ! _large_file_gate_repo_matches_remote_default "$repo_path" "$all_paths"; then
+		echo "[pulse-wrapper] Large-file gate: deferring #${issue_number} (${repo_slug}); ${repo_path} is not at the verified remote default-branch commit" >>"$LOGFILE"
+		return 1
+	fi
+	if ! _large_file_gate_collect_large_files "$all_paths" "$repo_path" "$issue_number" "$_LFG_REMOTE_MEASUREMENT_SHA"; then
+		echo "[pulse-wrapper] Large-file gate: deferring #${issue_number} (${repo_slug}); pinned remote target measurement unavailable" >>"$LOGFILE"
+		return 1
+	fi
+	if [[ -n "$_LFG_REMOTE_MEASUREMENT_SHA" ]]; then
+		echo "[pulse-wrapper] Large-file gate: measured #${issue_number} targets from pinned remote blob ${_LFG_REMOTE_MEASUREMENT_SHA} (canonical lagging)" >>"$LOGFILE"
+	fi
 	return 0
 }
 
@@ -1203,18 +1248,9 @@ _issue_targets_large_files() {
 		return 1
 	fi
 
-	# `_pulse_refresh_repo` is best-effort and canonical recovery may be delayed
-	# or unavailable on a contributor runner. When the pulse orchestration is
-	# loaded, require remote-default target freshness before any local wc -l.
-	# A lagging mirror is sufficient only when the target bytes provably match.
-	# Unverifiable measurements defer without labels or debt-issue mutations.
-	if declare -F _pulse_refresh_repo >/dev/null 2>&1 \
-		&& ! _large_file_gate_repo_matches_remote_default "$repo_path" "$all_paths"; then
-		echo "[pulse-wrapper] Large-file gate: deferring #${issue_number} (${repo_slug}); ${repo_path} is not at the verified remote default-branch commit" >>"$LOGFILE"
-		return 0
-	fi
-
-	_large_file_gate_collect_large_files "$all_paths" "$repo_path" "$issue_number"
+	# Canonical recovery is best-effort: use verified pinned blobs when lagging,
+	# or defer unverifiable measurements without labels or debt-issue mutations.
+	_large_file_gate_measure_verified_targets "$all_paths" "$repo_path" "$issue_number" "$repo_slug" || return 0
 
 	if [[ "$_LFG_FOUND_LARGE" == "true" ]]; then
 		# t2164: thread repo_path through so _large_file_gate_create_debt_issue
