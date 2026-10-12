@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.26] - 2026-10-13
+
+### Fixed
+
+- preserve merged receipt session cost baselines (GH#34510) (#34512)
+- read missing site registry from inventory (GH#34508) (#34509)
+- stop unchanged merged-partial redispatch loops (#34507)
+
 ## [3.39.25] - 2026-10-12
 
 ### Added
