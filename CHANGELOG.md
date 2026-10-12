@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.23] - 2026-10-12
+
+### Changed
+
+- Maintenance: mark t18678 complete (pr:#34472 completed:2026-10-12) (#34464)
+- Maintenance: mark t18677 complete (pr:#34461 completed:2026-10-12) (#34454)
+- Maintenance: add t18676 t18677 bash32-sigpipe and planning-push fixes
+
+### Fixed
+
+- define the cleanup-receipt failure helper at file scope
+- stop counting the async post-dispatch housekeeping run as a Pulse cycle
+- bind merge-gate closing references to their own repository (GH#34466) (#34473)
+- report reason and recovery when cleanup handoff receipt fails (GH#34468) (#34471)
+- keep process-lifetime EXIT cleanup off the shared RETURN-trap cleanup stack
+- isolate PR metadata and bookkeeping from upstream changes (#34467)
+- hold non-worker-ready briefs in planning publication instead of failing Issue Sync (#34463)
+- keep SIGPIPE ignored after a closed consumer so bash 3.2 PID emitters exit 0 (#34458)
+- skip only repo-verify on the dependency-free planning publication push
+
 ## [3.39.22] - 2026-10-12
 
 ### Changed
