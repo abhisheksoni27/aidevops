@@ -492,7 +492,9 @@ fixture_remote=$(printf 'large remote target fixture\n' | env \
 	GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.invalid \
 	git -C "$fixture_repo" commit-tree "$fixture_over_tree" -p "$fixture_remote") || exit 1
 cp "$UNDER_FILE" "${TMP}/target.sh"
-_large_file_gate_repo_matches_remote_default "$TMP" "target.sh:1-3000"
+rc=0
+_large_file_gate_repo_matches_remote_default "$TMP" "target.sh:1-3000" || rc=$?
+assert_eq "large pinned remote target passes freshness verification" "0" "$rc"
 SCOPED_RANGE_THRESHOLD=100
 _large_file_gate_collect_large_files "target.sh:1-3000" "$TMP" "9994" "$_LFG_REMOTE_MEASUREMENT_SHA"
 assert_eq "local under + pinned remote over gates" "true" "$_LFG_FOUND_LARGE"
