@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.25] - 2026-10-12
+
+### Added
+
+- add fast-forward-local route for local_only canonical repos (GH#34485) (#34487)
+
+### Changed
+
+- Refactor: extract claim task issue and allocation phases (GH#34492) (#34494)
+- Refactor: reduce complexity scan sweep and ratchet function lengths
+- Maintenance: add protected metrics downstream rollout brief
+- Maintenance: mark t18679 complete (pr:#34481 completed:2026-10-12) (#34482)
+
+### Fixed
+
+- keep gh audit anomaly alerts out of the worker dispatch queue
+- local_only worktree cleanup uses local ancestry proof and explicit guard reasons (GH#34488) (#34490)
+
 ## [3.39.24] - 2026-10-12
 
 ### Changed
