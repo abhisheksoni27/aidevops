@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.27] - 2026-10-13
+
+### Added
+
+- add repository-scoped GitHub App reads
+
+### Changed
+
+- Maintenance: mark t18687 complete (pr:#34530 completed:2026-10-13) (#34529)
+- Maintenance: mark t18685 complete (pr:#34525 completed:2026-10-13) (#34523)
+- Maintenance: mark t18683 complete (pr:#34519 completed:2026-10-12) (#34520)
+
+### Fixed
+
+- xAI Grok compaction targets 190K, below the 200K price band
+- route unscoped reads to existing auth; App reads for all Pulse entrypoints
+- separate registry queries and preserve unknown ownership
+- add unprivileged NixOS process evidence
+- terminate repair routes for closed issues (#34532)
+- bound preflight prefetch phases (GH#34527) (#34530)
+- cool down unchanged draft checkpoints (GH#34526) (#34528)
+- bound GH#34000 supervisor deferral on permanently degraded prefetch
+- stop dependency sweeps starving large blocked backlogs
+- stub live ownership fence state in worker detection (#34519)
+- verify pinned-blob triage measurements (GH#34514) (#34518)
+
 ## [3.39.26] - 2026-10-13
 
 ### Fixed
