@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.31] - 2026-10-14
+
+### Changed
+
+- Documentation: add Hostinger read-only audit notes (#34595)
+
+### Fixed
+
+- closed-issue hold re-comments every cycle under App read auth
+- preserve maintenance and worker lifecycle contracts
+- read exact-head manifest through PR commits (#34597)
+- refresh pulse benign-ledger cleanup guardrail (GH#34591) (#34593)
+
 ## [3.39.30] - 2026-10-14
 
 ### Fixed
