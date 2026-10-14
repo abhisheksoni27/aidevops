@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { runGuardian, spawnGuardian, stopGuardian } from "./playwriter-relay-guardian.mjs";
 import {
   MARKER_NAME,
+  POSIX_GROUPS,
   STATE_SCHEMA,
   STOP_SIGNALS,
   TERMINATE_GRACE_MS,
@@ -286,6 +287,11 @@ async function supervise(command, environment) {
 export async function main(argv = process.argv.slice(2), environment = process.env) {
   if (environment.AIDEVOPS_PLAYWRITER_AUTHENTICATED_RELAY !== "1") {
     throw fixedError("opt-in environment flag is not enabled");
+  }
+  // Refuse both supervisor and guardian entry before any runtime or child exists.
+  // Signalling only a Windows package runner can orphan the real relay listener.
+  if (!POSIX_GROUPS) {
+    throw fixedError("requires POSIX process groups; Windows is not supported");
   }
   if (argv[0] === GUARDIAN_FLAG) {
     const relayCommand = validatePlaywriterCommand(argv.slice(1));

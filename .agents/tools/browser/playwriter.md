@@ -108,7 +108,9 @@ the value first with `aidevops secret set PLAYWRITER_TOKEN`; never place it in
 MCP configuration, commands, logs, or prompts. The launcher accepts only the
 reviewed `playwriter@0.8.0` command, requires a 32-character token, verifies the
 relay version and token challenge, records private ownership state, and stops
-only a relay process it started. On macOS/Linux its relay runs under a guardian
+only a relay process it started. Authenticated relay mode requires POSIX process
+groups (macOS/Linux); on Windows it refuses to start before creating runtime
+state or spawning any relay or MCP process. On supported platforms its relay runs under a guardian
 that stops the whole package-runner process group (`npm exec`/`bun x` plus the
 `playwriter-serve` listener) on MCP disconnect, repeated or hangup signals, or
 even a killed supervisor. The next launch reconciles any owned relay whose
