@@ -134,6 +134,63 @@ assert_allowed_with_temp_root() {
 	return 0
 }
 
+# GH#34676: clone writes to its explicit destination, not the canonical cwd.
+mkdir -p "$TEST_ROOT/empty-clone" "$TEST_ROOT/nonempty-clone"
+printf 'existing\n' >"$TEST_ROOT/nonempty-clone/file"
+ln -s "$REPO" "$TEST_ROOT/canonical-alias"
+assert_allowed "allows clone outside canonical cwd" "$REPO" "git clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_allowed "allows clone into an empty directory" "$REPO" "git clone '$REPO' '$TEST_ROOT/empty-clone'"
+assert_allowed "allows relative outside clone destination" "$REPO" "git clone '$REPO' ../new-clone"
+assert_allowed "resolves chained -C for clone" "$TEST_ROOT" "git -C repo -C . clone --depth 1 '$REPO' ../new-clone"
+assert_allowed "parses clone branch and option terminator" "$REPO" "git clone -b main -- '$REPO' '$TEST_ROOT/new-clone'"
+assert_allowed "allows outside auxiliary clone paths" "$REPO" "git clone --separate-git-dir='$TEST_ROOT/new.git' --template '$TEST_ROOT/template' '$REPO' '$TEST_ROOT/new-clone'"
+assert_allowed "allows gh credential reset prefix" "$REPO" "git -c credential.https://github.com.helper= clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks arbitrary credential helper prefix" "git -c credential.helper='!sh -c unsafe' clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks credential helper shell suffix" "git -c credential.helper='!gh auth git-credential; true' clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks untrusted gh credential executable" "git -c credential.helper='!$TEST_ROOT/gh auth git-credential' clone '$REPO' '$TEST_ROOT/new-clone'"
+if python3 - "$SCRIPT_DIR" <<'PY'; then
+import sys
+sys.path.insert(0, sys.argv[1])
+from canonical_git_clone import _gh_credential_executable
+
+assert _gh_credential_executable('!"/usr/bin/gh" auth git-credential') == '/usr/bin/gh'
+for helper in (
+    '!"/usr/bin/gh"\nauth git-credential',
+    '!"/usr/bin/gh" auth git-credential; true',
+    '!"/usr/bin/$(command)/gh" auth git-credential',
+    '!gh auth git-credential',
+):
+    assert not _gh_credential_executable(helper), helper
+PY
+	pass "gh credential grammar rejects shell control syntax before trust checks"
+else
+	fail "gh credential grammar rejects shell control syntax before trust checks"
+fi
+assert_blocked "blocks clone without explicit destination" "git clone '$REPO'"
+assert_blocked "blocks clone within canonical checkout" "git clone '$REPO' nested"
+assert_blocked "blocks clone within another canonical checkout" "git clone '$REPO' '$MARKED_REPO/nested'"
+assert_blocked "blocks clone into a nonempty directory" "git clone '$REPO' '$TEST_ROOT/nonempty-clone'"
+assert_blocked "blocks clone via symlink into canonical checkout" "git clone '$REPO' '$TEST_ROOT/canonical-alias/nested'"
+assert_blocked "blocks clone with canonical separate git dir" "git clone --separate-git-dir '$REPO/.git/objects/new' '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone with canonical template" "git clone --template='$REPO/.git' '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone into registered separate metadata" "git clone --separate-git-dir '$SEPARATE_GIT_DIR/clone' '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone into nonempty auxiliary directory" "git clone --separate-git-dir '$TEST_ROOT/nonempty-clone' '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone object-directory redirection" "env GIT_OBJECT_DIRECTORY='$REPO/.git/objects' git clone --no-local '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone global config override" "env GIT_CONFIG_GLOBAL='$TEST_ROOT/config' git clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone system config override" "env GIT_CONFIG_SYSTEM='$TEST_ROOT/config' git clone '$REPO' '$TEST_ROOT/new-clone'"
+GIT_OBJECT_DIRECTORY="$REPO/.git/objects" assert_blocked "blocks inherited clone object override" "git clone '$REPO' '$TEST_ROOT/new-clone'"
+GIT_CONFIG_GLOBAL="$TEST_ROOT/config" assert_blocked "blocks inherited clone config override" "git clone '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks clone config redirection" "git clone -c core.worktree='$REPO' '$REPO' '$TEST_ROOT/new-clone'"
+assert_blocked "blocks unknown clone options" "git clone --unknown '$REPO' '$TEST_ROOT/new-clone'"
+# shellcheck disable=SC2016
+assert_blocked "blocks unresolved clone destination" 'git clone source "$DESTINATION"'
+if (cd "$REPO" && PATH="${SCRIPT_DIR}:${TEST_SYS_PATH}" "$SHIM" clone -q "$REPO" "$TEST_ROOT/runtime-clone") &&
+	[[ "$(git -C "$TEST_ROOT/runtime-clone" rev-parse HEAD)" == "$INITIAL_HEAD" ]]; then
+	pass "PATH shim performs a real outside clone from canonical cwd"
+else
+	fail "PATH shim performs a real outside clone from canonical cwd"
+fi
+
 # GH#34179: version flags have no subcommand, but are exact read-only queries.
 assert_allowed "allows canonical version flag" "$REPO" "git --version"
 assert_allowed "allows canonical short version flag" "$REPO" "git -v"
