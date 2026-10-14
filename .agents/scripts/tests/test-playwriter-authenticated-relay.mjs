@@ -8,7 +8,9 @@ import { createServer } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { inspectProcess } from "../playwriter-relay-reconcile.mjs";
 import {
   createPrivateRuntime,
   privateRuntimeParent,
@@ -25,6 +27,14 @@ import {
 
 const POSIX = process.platform !== "win32";
 const GUARDIAN_ARGS = ["--aidevops-relay-guardian", "npx", "-y", "playwriter@0.8.0"];
+const LAUNCHER = fileURLToPath(new URL("../playwriter-authenticated-relay.mjs", import.meta.url));
+
+function inspectSyntheticGuardian(pid) {
+  const leader = inspectProcess(pid);
+  const argv = leader?.argv ?? leader?.legacyArgv;
+  if (!GUARDIAN_ARGS.every((part, index) => argv?.at(-GUARDIAN_ARGS.length + index) === part)) return leader;
+  return { ...leader, argv: [process.execPath, LAUNCHER, ...GUARDIAN_ARGS] };
+}
 
 // A package-runner stand-in: the group leader starts a loopback listener on an
 // OS-assigned port that ignores SIGTERM, like a relay that outlives `npm exec`.
@@ -40,12 +50,21 @@ function alive(pid) {
   }
 }
 
-async function startSyntheticGroup(t, extraArgs = []) {
+async function startSyntheticGroup(t, extraArgs = [], realGuardian = false) {
   // `--` keeps the guardian-shaped arguments out of Node's own option parser
   // while leaving them visible in the process command line.
-  const leader = spawn(process.execPath, ["-e", LEADER, "--", ...extraArgs], {
+  let args = ["-e", LEADER, "--", ...extraArgs];
+  if (realGuardian) {
+    // Exercise the actual launcher and inspector without running a package
+    // manager or contacting the network. The reviewed runner name is npx.
+    const runner = join(mkdtempSync(join(tmpdir(), "aidevops-playwriter-runner-")), "npx");
+    writeFileSync(runner, `#!${process.execPath}\n${LEADER}\n`, { mode: 0o700 });
+    args = [LAUNCHER, GUARDIAN_ARGS[0], runner, ...GUARDIAN_ARGS.slice(2)];
+  }
+  const leader = spawn(process.execPath, args, {
     detached: true,
-    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, AIDEVOPS_PLAYWRITER_AUTHENTICATED_RELAY: "1" },
+    stdio: ["ignore", "pipe", "ignore", "ipc"],
   });
   t.after(() => {
     try { process.kill(-leader.pid, "SIGKILL"); } catch {}
@@ -73,6 +92,7 @@ function writeSession(parent, supervisorPid, state) {
     version: "0.8.0",
     supervisorPid,
     owned: true,
+    relayStartTime: inspectProcess(state.relayGroupId)?.startTime,
     ...state,
   })}\n`, { mode: 0o600 });
   return { name, directory };
@@ -155,9 +175,9 @@ test("stops every member of an owned relay process group", { skip: !POSIX }, asy
   await assert.rejects(terminateProcessGroup(process.pid), /invalid process group/);
 });
 
-test("reconciles an owned relay left by a dead supervisor", { skip: !POSIX }, async (t) => {
+test("reconciles an owned relay left by a dead supervisor", { skip: process.platform !== "linux" }, async (t) => {
   const parent = privateRuntimeParent(mkdtempSync(join(tmpdir(), "aidevops-playwriter-relay-")));
-  const { groupId, descendantPid } = await startSyntheticGroup(t, GUARDIAN_ARGS);
+  const { groupId, descendantPid } = await startSyntheticGroup(t, GUARDIAN_ARGS, true);
   const session = writeSession(parent, deadPid(), { relayGroupId: groupId });
 
   assert.deepEqual(await reconcileStaleRelays(parent), [session.name]);
@@ -185,4 +205,59 @@ test("never stops a relay without proven stale ownership", { skip: !POSIX }, asy
   }
   assert.equal(existsSync(foreignSession.directory), true);
   assert.equal(existsSync(liveSession.directory), true);
+});
+
+test("preserves substring impostors and mismatched or missing start identities", { skip: !POSIX }, async (t) => {
+  const parent = privateRuntimeParent(mkdtempSync(join(tmpdir(), "aidevops-playwriter-relay-")));
+  // These strings occur inside one argument, not a reviewed guardian argv.
+  const impostor = await startSyntheticGroup(t, [GUARDIAN_ARGS.join(" ")]);
+  const impostorSession = writeSession(parent, deadPid(), { relayGroupId: impostor.groupId });
+  assert.deepEqual(await reconcileStaleRelays(parent), []);
+  assert.equal(processGroupAlive(impostor.groupId), true);
+  assert.equal(existsSync(impostorSession.directory), true);
+
+  for (const relayStartTime of ["different-process-start", null, undefined]) {
+    const group = await startSyntheticGroup(t, GUARDIAN_ARGS);
+    const session = writeSession(parent, deadPid(), { relayGroupId: group.groupId, relayStartTime });
+    assert.deepEqual(await reconcileStaleRelays(parent, { inspect: inspectSyntheticGuardian }), []);
+    assert.equal(processGroupAlive(group.groupId), true);
+    assert.equal(alive(group.descendantPid), true);
+    assert.equal(existsSync(session.directory), true);
+  }
+});
+
+test("requires the exact guardian executable, launcher, flag and reviewed runner", { skip: !POSIX }, async (t) => {
+  const parent = privateRuntimeParent(mkdtempSync(join(tmpdir(), "aidevops-playwriter-relay-")));
+  const group = await startSyntheticGroup(t, GUARDIAN_ARGS);
+  const session = writeSession(parent, deadPid(), { relayGroupId: group.groupId });
+  const expected = [process.execPath, LAUNCHER, ...GUARDIAN_ARGS];
+  for (const index of [0, 1, 2, 3, 4, 5]) {
+    const argv = expected.map((part, position) => position === index ? `${part}-foreign` : part);
+    const inspect = (pid) => ({ ...inspectProcess(pid), argv });
+    assert.deepEqual(await reconcileStaleRelays(parent, { inspect }), []);
+    assert.equal(processGroupAlive(group.groupId), true);
+    assert.equal(existsSync(session.directory), true);
+  }
+  const inspect = (pid) => ({ ...inspectProcess(pid), argv: undefined, legacyArgv: expected });
+  assert.deepEqual(await reconcileStaleRelays(parent, { inspect }), [], "ambiguous ps tokens are not v2 argv proof");
+  assert.equal(processGroupAlive(group.groupId), true);
+  assert.equal(existsSync(session.directory), true);
+});
+
+test("keeps legacy v1 reconciliation with exact package and relay argument tokens", { skip: !POSIX }, async (t) => {
+  const parent = privateRuntimeParent(mkdtempSync(join(tmpdir(), "aidevops-playwriter-relay-")));
+  const group = await startSyntheticGroup(t);
+  const session = writeSession(parent, group.groupId, {
+    schema: "aidevops-playwriter-relay/v1", relayPid: group.groupId,
+  });
+  // v1's dead supervisor led the still-live relay group; emulate its absence
+  // with a short-lived leader and a descendant surviving in that group.
+  process.kill(group.groupId, "SIGKILL");
+  await new Promise((resolvePromise) => {
+    const check = () => alive(group.groupId) ? setTimeout(check, 10) : resolvePromise();
+    check();
+  });
+  const inspect = () => ({ groupId: group.groupId, argv: ["npx", "playwriter@0.8.0", "serve", "--host", "127.0.0.1"] });
+  assert.deepEqual(await reconcileStaleRelays(parent, { inspect }), [session.name]);
+  assert.equal(alive(group.descendantPid), false);
 });

@@ -19,7 +19,7 @@ import {
   removePrivateRuntime,
   terminateChild,
 } from "./playwriter-relay-lifecycle.mjs";
-import { reconcileOwnedRelays } from "./playwriter-relay-reconcile.mjs";
+import { guardianStartTime, reconcileOwnedRelays } from "./playwriter-relay-reconcile.mjs";
 
 // Reviewed pin (GH#34549). Bump only after re-proving the /version, token
 // challenge, loopback and telemetry opt-out contract against the release.
@@ -39,8 +39,9 @@ const RELAY_CONTRACT = Object.freeze({
   version: PLAYWRITER_VERSION,
   port: RELAY_PORT,
   packageName: PLAYWRITER_PACKAGE,
-  legacyShape: RELAY_ARGS.join(" "),
-  guardianShape: GUARDIAN_FLAG,
+  legacyArgs: RELAY_ARGS,
+  guardianArgv: [process.execPath, GUARDIAN.scriptPath, GUARDIAN_FLAG],
+  validateCommand: validatePlaywriterCommand,
 });
 
 function fixedError(message) {
@@ -195,6 +196,9 @@ async function ensureRelay(command, environment, runtime, token) {
   }
 
   const child = spawnGuardian(GUARDIAN, command, environment, runtime);
+  // Capture the spawned guardian, not a later occupant of its PID after the
+  // asynchronous readiness probe. An unreadable identity stays unproven.
+  const relayStartTime = guardianStartTime(child.pid, RELAY_CONTRACT, command);
   const proof = await waitForRelay(token, child);
   if (!proof.ready) {
     await stopGuardian(child);
@@ -204,7 +208,7 @@ async function ensureRelay(command, environment, runtime, token) {
     // Another relay won the port race; this guardian has already exited.
     return { child: null, owned: false };
   }
-  return { child, owned: true };
+  return { child, owned: true, relayStartTime };
 }
 
 function writeState(runtime, relay) {
@@ -215,6 +219,7 @@ function writeState(runtime, relay) {
     version: PLAYWRITER_VERSION,
     supervisorPid: process.pid,
     relayGroupId: relay.owned ? relay.child.pid : null,
+    relayStartTime: relay.owned ? relay.relayStartTime : null,
     owned: relay.owned,
   };
   writeFileSync(runtime.statePath, `${JSON.stringify(state)}\n`, { flag: "wx", mode: 0o600 });
