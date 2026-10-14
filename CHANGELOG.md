@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.28] - 2026-10-14
+
+### Added
+
+- add explicit repository auth routes and migration
+
+### Changed
+
+- Maintenance: promote OpenCode V2 pin to 2.0.28
+- Maintenance: promote OpenCode v1 pin to 1.19.0 (GH#34542)
+
+### Fixed
+
+- idempotent worktree cleanup archives and duplicate stash dedupe
+- metadata-only Codex request-compression diagnostics
+- report approval command despite maintainer check failure (#34570)
+- detached worker logs use managed temp root, not host /tmp
+- match check-runs/status query strings in NMR approval gh stub (GH#34563) (#34565)
+- refuse unanchored issue-lock approvals
+- record HTTP status for gh write errors and share update-branch conflict cooldown (GH#34560)
+- post triage comments before idempotent advisory labels (#34559)
+- surface invalid per-repo GitHub App auth config instead of silent empty candidates (#34555)
+- make source-access V3 manifest fixture umask-independent (#34553)
+
 ## [3.39.27] - 2026-10-13
 
 ### Added
