@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.29] - 2026-10-14
+
+### Fixed
+
+- narrow prompt-guard 'new task' instruction_override match
+- preserve late edits during closed-issue cleanup (#34584)
+
 ## [3.39.28] - 2026-10-14
 
 ### Added
