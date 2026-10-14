@@ -3,21 +3,23 @@
 // SPDX-FileCopyrightText: 2025-2026 Marcus Quinn
 
 import { spawn } from "node:child_process";
-import {
-  chmodSync,
-  closeSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { runGuardian, spawnGuardian, stopGuardian } from "./playwriter-relay-guardian.mjs";
+import {
+  MARKER_NAME,
+  STATE_SCHEMA,
+  STOP_SIGNALS,
+  TERMINATE_GRACE_MS,
+  hasExited,
+  pause,
+  removePrivateRuntime,
+  terminateChild,
+} from "./playwriter-relay-lifecycle.mjs";
+import { reconcileOwnedRelays } from "./playwriter-relay-reconcile.mjs";
 
 // Reviewed pin (GH#34549). Bump only after re-proving the /version, token
 // challenge, loopback and telemetry opt-out contract against the release.
@@ -25,7 +27,21 @@ const PLAYWRITER_VERSION = "0.8.0";
 const PLAYWRITER_PACKAGE = `playwriter@${PLAYWRITER_VERSION}`;
 const RELAY_HOST = "127.0.0.1";
 const RELAY_PORT = 19988;
+const RELAY_ARGS = ["serve", "--host", RELAY_HOST];
 const START_TIMEOUT_MS = 5_000;
+const GUARDIAN_FLAG = "--aidevops-relay-guardian";
+const GUARDIAN = Object.freeze({
+  scriptPath: fileURLToPath(import.meta.url),
+  guardianFlag: GUARDIAN_FLAG,
+});
+// What a stale owned relay must still match before reconciliation stops it.
+const RELAY_CONTRACT = Object.freeze({
+  version: PLAYWRITER_VERSION,
+  port: RELAY_PORT,
+  packageName: PLAYWRITER_PACKAGE,
+  legacyShape: RELAY_ARGS.join(" "),
+  guardianShape: GUARDIAN_FLAG,
+});
 
 function fixedError(message) {
   return new Error(`Authenticated Playwriter relay: ${message}`);
@@ -81,7 +97,7 @@ function privateDirectory(path) {
   chmodSync(path, 0o700);
 }
 
-export function createPrivateRuntime(tempRoot, ownerToken = randomUUID()) {
+export function privateRuntimeParent(tempRoot) {
   if (!isAbsolute(tempRoot)) throw fixedError("AIDEVOPS_TEMP_DIR must be absolute");
   privateDirectory(tempRoot);
   const physicalTempRoot = realpathSync(tempRoot);
@@ -92,9 +108,14 @@ export function createPrivateRuntime(tempRoot, ownerToken = randomUUID()) {
   if (relativeParent.startsWith("..") || isAbsolute(relativeParent)) {
     throw fixedError("private runtime path escapes AIDEVOPS_TEMP_DIR");
   }
+  return physicalParent;
+}
+
+export function createPrivateRuntime(tempRoot, ownerToken = randomUUID()) {
+  const physicalParent = privateRuntimeParent(tempRoot);
   const directory = join(physicalParent, `session-${process.pid}-${randomUUID()}`);
   mkdirSync(directory, { mode: 0o700 });
-  const markerPath = join(directory, ".aidevops-owned-relay");
+  const markerPath = join(directory, MARKER_NAME);
   writeFileSync(markerPath, ownerToken, { flag: "wx", mode: 0o600 });
   return {
     directory,
@@ -103,17 +124,6 @@ export function createPrivateRuntime(tempRoot, ownerToken = randomUUID()) {
     logPath: join(directory, "relay.log"),
     statePath: join(directory, "state.json"),
   };
-}
-
-export function cleanupPrivateRuntime(runtime) {
-  const stats = lstatSync(runtime.directory);
-  if (!stats.isDirectory() || stats.isSymbolicLink()) {
-    throw fixedError("refusing cleanup of a non-regular runtime directory");
-  }
-  if (readFileSync(runtime.markerPath, "utf8") !== runtime.ownerToken) {
-    throw fixedError("refusing cleanup without matching ownership evidence");
-  }
-  rmSync(runtime.directory, { recursive: true, force: false });
 }
 
 function relayUrl(path, port = RELAY_PORT) {
@@ -157,42 +167,24 @@ export async function probeAuthenticatedRelay({
   }
 }
 
-function spawnRelay(command, environment, runtime) {
-  const logDescriptor = openSync(runtime.logPath, "a", 0o600);
-  chmodSync(runtime.logPath, 0o600);
-  try {
-    const child = spawn(command[0], [...command.slice(1), "serve", "--host", RELAY_HOST], {
-      env: environment,
-      shell: false,
-      stdio: ["ignore", logDescriptor, logDescriptor],
-    });
-    child.spawnFailed = false;
-    child.once("error", () => { child.spawnFailed = true; });
-    return child;
-  } finally {
-    closeSync(logDescriptor);
-  }
-}
-
 async function waitForRelay(token, child) {
   const deadline = Date.now() + START_TIMEOUT_MS;
   do {
     const proof = await probeAuthenticatedRelay({ token });
     if (proof.ready) return proof;
-    if (proof.reachable || child.spawnFailed || child.exitCode !== null) return proof;
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    if (proof.reachable || child.spawnFailed || hasExited(child)) return proof;
+    await pause(100);
   } while (Date.now() < deadline);
   return { reachable: false, ready: false };
 }
 
-async function terminateChild(child) {
-  if (!child || child.exitCode !== null) return;
-  child.kill("SIGTERM");
-  await Promise.race([
-    new Promise((resolvePromise) => child.once("exit", resolvePromise)),
-    new Promise((resolvePromise) => setTimeout(resolvePromise, 2_000)),
-  ]);
-  if (child.exitCode === null) child.kill("SIGKILL");
+/**
+ * Stop owned relays left by earlier sessions whose supervisor died without
+ * cleanup; see reconcileOwnedRelays for the ownership proof required.
+ * @returns {Promise<string[]>} names of the session directories removed
+ */
+export function reconcileStaleRelays(parent, options = {}) {
+  return reconcileOwnedRelays(parent, RELAY_CONTRACT, options);
 }
 
 async function ensureRelay(command, environment, runtime, token) {
@@ -202,13 +194,14 @@ async function ensureRelay(command, environment, runtime, token) {
     throw fixedError("port 19988 is occupied without matching token and version proof");
   }
 
-  const child = spawnRelay(command, environment, runtime);
+  const child = spawnGuardian(GUARDIAN, command, environment, runtime);
   const proof = await waitForRelay(token, child);
   if (!proof.ready) {
-    await terminateChild(child);
+    await stopGuardian(child);
     throw fixedError("could not prove the localhost relay version and token contract");
   }
-  if (child.exitCode !== null || child.spawnFailed) {
+  if (hasExited(child) || child.spawnFailed) {
+    // Another relay won the port race; this guardian has already exited.
     return { child: null, owned: false };
   }
   return { child, owned: true };
@@ -216,12 +209,12 @@ async function ensureRelay(command, environment, runtime, token) {
 
 function writeState(runtime, relay) {
   const state = {
-    schema: "aidevops-playwriter-relay/v1",
+    schema: STATE_SCHEMA,
     host: RELAY_HOST,
     port: RELAY_PORT,
     version: PLAYWRITER_VERSION,
     supervisorPid: process.pid,
-    relayPid: relay.owned ? relay.child.pid : null,
+    relayGroupId: relay.owned ? relay.child.pid : null,
     owned: relay.owned,
   };
   writeFileSync(runtime.statePath, `${JSON.stringify(state)}\n`, { flag: "wx", mode: 0o600 });
@@ -231,13 +224,32 @@ async function supervise(command, environment) {
   const token = requireToken(environment);
   const tempRoot = environment.AIDEVOPS_TEMP_DIR
     || join(homedir(), ".aidevops", ".agent-workspace", "tmp");
+  await reconcileStaleRelays(privateRuntimeParent(tempRoot));
   const runtime = createPrivateRuntime(tempRoot);
   let relay = null;
   let mcp = null;
   let stopping = false;
+  // GH#34615: persistent handlers for every stop signal. With `once`, a
+  // repeated SIGTERM fell through to Node's default action and killed the
+  // supervisor before `finally`, leaving the owned relay running.
+  // Absorbing repeats must not hang shutdown, so the first stop signal also
+  // arms one bounded SIGKILL escalation for an MCP child that ignores it.
+  let escalation = null;
+  const onStopSignal = (signal) => {
+    stopping = true;
+    if (!mcp || hasExited(mcp)) return;
+    mcp.kill(signal === "SIGHUP" ? "SIGTERM" : signal);
+    escalation ??= setTimeout(() => {
+      if (!hasExited(mcp)) mcp.kill("SIGKILL");
+    }, TERMINATE_GRACE_MS);
+    escalation.unref();
+  };
+  const handlers = STOP_SIGNALS.map((signal) => [signal, () => onStopSignal(signal)]);
+  for (const [signal, handler] of handlers) process.on(signal, handler);
   try {
     relay = await ensureRelay(command, environment, runtime, token);
     writeState(runtime, relay);
+    if (stopping) return 1;
     mcp = spawn(command[0], command.slice(1), {
       env: {
         ...environment,
@@ -247,15 +259,9 @@ async function supervise(command, environment) {
       stdio: "inherit",
     });
 
-    const forwardSignal = (signal) => {
-      stopping = true;
-      if (mcp.exitCode === null) mcp.kill(signal);
-    };
-    process.once("SIGINT", () => forwardSignal("SIGINT"));
-    process.once("SIGTERM", () => forwardSignal("SIGTERM"));
     if (relay.owned) {
       relay.child.once("exit", () => {
-        if (!stopping && mcp?.exitCode === null) mcp.kill("SIGTERM");
+        if (!stopping && mcp && !hasExited(mcp)) mcp.kill("SIGTERM");
       });
     }
 
@@ -267,15 +273,23 @@ async function supervise(command, environment) {
     return result.code ?? (result.signal ? 1 : 0);
   } finally {
     stopping = true;
-    await terminateChild(mcp);
-    if (relay?.owned) await terminateChild(relay.child);
-    cleanupPrivateRuntime(runtime);
+    await Promise.all([
+      terminateChild(mcp),
+      relay?.owned ? stopGuardian(relay.child) : Promise.resolve(),
+    ]);
+    // Synchronous from here on, so no signal can interleave with cleanup.
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+    removePrivateRuntime(runtime);
   }
 }
 
 export async function main(argv = process.argv.slice(2), environment = process.env) {
   if (environment.AIDEVOPS_PLAYWRITER_AUTHENTICATED_RELAY !== "1") {
     throw fixedError("opt-in environment flag is not enabled");
+  }
+  if (argv[0] === GUARDIAN_FLAG) {
+    const relayCommand = validatePlaywriterCommand(argv.slice(1));
+    return runGuardian(relayCommand, RELAY_ARGS, withTelemetryOptOut(environment));
   }
   const command = validatePlaywriterCommand(argv);
   return supervise(command, withTelemetryOptOut(environment));
