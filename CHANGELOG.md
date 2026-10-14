@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.30] - 2026-10-14
+
+### Fixed
+
+- exclude persistent monitoring issues from objective ledger and stream large evidence
+
 ## [3.39.29] - 2026-10-14
 
 ### Fixed
