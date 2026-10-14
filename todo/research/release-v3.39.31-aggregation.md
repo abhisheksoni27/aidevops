@@ -17,6 +17,7 @@ records and first-parent history, not a substitute for the release verifier.
 
 ## Immutable reviewed base
 
+- Aggregation PR: #34650, bound to the final commit's immutable source trailers.
 - Published baseline: v3.39.30 at c3271d3ba920fec06de6ebc98a03bbb2d1850416.
 - Aggregation base: 7cdcdd35d33c729b974d836da80027c6035d7a0d.
 - Original signed release commit: 92ff98fab7e7bd834b1286e6e1901d23eca96aba.
