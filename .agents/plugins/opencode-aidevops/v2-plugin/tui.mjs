@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { writeCurrentDirectory, writeSessionRecoveryMarker } from "../session-recovery-marker.mjs";
 import { readAidevopsVersion, withAidevopsTitleSuffix } from "../session-title-suffix.mjs";
 import { sanitizeTerminalTitle, withTerminalTitleStatus } from "../terminal-title.mjs";
+import { setupPromptsSlot } from "../tui-prompts.mjs";
 
 // Distinct from the server plugin id so TUI and server registries never collide.
 export const AIDEVOPS_V2_TUI_PLUGIN_ID = "aidevops-tui";
@@ -299,7 +300,7 @@ export function setupTabbyRecovery(
 export default {
   id: AIDEVOPS_V2_TUI_PLUGIN_ID,
   setup(api) {
-    const cleanups = [setupTerminalTitle(api), setupVersionSlots(api), setupTabbyRecovery(api)].filter(Boolean);
+    const cleanups = [setupTerminalTitle(api), setupVersionSlots(api), setupPromptsSlot(api), setupTabbyRecovery(api)].filter(Boolean);
     return () => {
       for (const cleanup of cleanups) cleanup();
     };
