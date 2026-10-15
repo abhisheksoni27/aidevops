@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.34] - 2026-10-15
+
+### Fixed
+
+- verify runtime-owned blocked exits (#34776)
+
 ## [3.39.33] - 2026-10-15
 
 ### Changed
