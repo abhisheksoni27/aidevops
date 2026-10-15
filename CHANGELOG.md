@@ -10,6 +10,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.32] - 2026-10-15
+
+### Added
+
+- add isolated OpenCode TUI capture config for GH#34712 (#34716)
+- add Prompts sidebar timeline navigation
+
+### Changed
+
+- Maintenance: bump secretlint from 13.0.6 to 13.0.7
+- Documentation: correct Hostinger per-version PHP audit notes (GH#34727) (#34728)
+- Maintenance: mark t18701 complete (pr:#34742 completed:2026-10-15) (#34751)
+- Maintenance: bump plugin-react to 6.1.2 (#34738)
+- Maintenance: mark t18700 complete (pr:#34741 completed:2026-10-15) (#34748)
+- Maintenance: mark t18697 complete (pr:#34733 completed:2026-10-15) (#34745)
+- Maintenance: update secretlint preset to 13.0.7 (#34744)
+- Maintenance: mark t18695 complete (pr:#34726 completed:2026-10-15) (#34734)
+- Maintenance: mark t18694 complete (pr:#34714 completed:2026-10-14) (#34724)
+- Documentation: correct image-library upload reachability notes (#34725)
+- Maintenance: bump vite from 8.3.1 to 8.3.3 (#34706)
+- Maintenance: adopt reviewed actions updates for GH#34693 (#34699)
+- Documentation: audit image-library upload reachability (#34691)
+
+### Fixed
+
+- fail closed on standalone browser Task transport
+- preserve encoded OpenCode V2 pooled request bodies
+- keep bot authors out of collaborator permission API
+- continue runner_capability_unmet drafts on a capable runner
+- explain successor aggregation refusals
+- replace stale PR-less provenance branches (#34757)
+- stage protected release tag in a GitHub-accepted commit envelope
+- update Hono and support system Bash on NixOS for GH#34698 (#34740)
+- make subagent index sorting locale-independent (#34708)
+- scan pushed commit ranges in gh wrapper guard (#34692)
+
 ## [3.39.31] - 2026-10-14
 
 ### Changed
