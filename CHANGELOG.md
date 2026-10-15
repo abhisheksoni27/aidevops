@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.33] - 2026-10-15
+
+### Changed
+
+- Tests: configure test signer in version-manager aggregate-recovery suite (#34772)
+- Maintenance: sync GitHub issue refs to TODO.md (#34760)
+
+### Fixed
+
+- reinstate untracked files after sync; allow untracked-only fast-forward
+- discard failed signing-key API output
+
 ## [3.39.32] - 2026-10-15
 
 ### Added
