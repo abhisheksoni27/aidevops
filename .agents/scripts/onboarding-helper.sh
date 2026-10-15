@@ -266,9 +266,10 @@ _cloudflare_status() {
 check_hosting() {
 	echo -e "${BLUE}Hosting Providers${NC}"
 
-	# Hetzner - check for any HCLOUD_TOKEN_* variable
+	# Hetzner - per-project tokens: HCLOUD_<PROJECT>_TOKEN (current naming
+	# convention) or legacy HCLOUD_TOKEN_<PROJECT>
 	local hetzner_configured=false
-	for var in $(env | grep -o '^HCLOUD_TOKEN_[A-Z_]*' 2>/dev/null || true); do
+	for var in $(env | grep -oE '^HCLOUD_(TOKEN_[A-Z0-9_]+|[A-Z0-9_]+_TOKEN)' 2>/dev/null || true); do
 		if is_configured "$var"; then
 			hetzner_configured=true
 			break
@@ -277,7 +278,7 @@ check_hosting() {
 	if [[ "$hetzner_configured" == "true" ]]; then
 		print_service "Hetzner Cloud" "ready" "API token configured"
 	else
-		print_service "Hetzner Cloud" "needs-setup" "HCLOUD_TOKEN_* not set"
+		print_service "Hetzner Cloud" "needs-setup" "HCLOUD_<PROJECT>_TOKEN not set"
 	fi
 
 	local cf_status cf_detail
@@ -911,7 +912,9 @@ _guide_hetzner() {
 	echo "2. Go to: Security -> API Tokens"
 	echo "3. Generate token with Read & Write permissions"
 	echo "4. Store token:"
-	echo "   ~/.aidevops/agents/scripts/setup-local-api-keys.sh set HCLOUD_TOKEN_MAIN \"your-token\""
+	echo "   (record the project, then use a project-specific name)"
+	echo "   aidevops secret account add hetzner-<project> --provider hetzner --name \"<Project name>\""
+	echo "   aidevops secret set HCLOUD_<PROJECT>_TOKEN --provider hetzner --account hetzner-<project>"
 	return 0
 }
 
