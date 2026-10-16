@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.35] - 2026-10-16
+
+### Changed
+
+- Maintenance: bump mcp (#34781)
+
+### Fixed
+
+- normalize scalar MCP timeout so V2 does not disable the plugin
+- provision all intake labels and preserve gh errors (#34788)
+- exempt non-runtime dependency drift (GH#34782) (#34784)
+
 ## [3.39.34] - 2026-10-15
 
 ### Fixed
