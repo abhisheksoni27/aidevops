@@ -10,6 +10,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.37] - 2026-10-16
+
+### Added
+
+- add fleet health check (#34816)
+- snapshot, action-status, metrics, server-net and HCLOUD_TOKEN_<PROJECT> support (#34814)
+- cloudron-package-monitor follows commit-pinned upstreams (GH#34805) (#34807)
+
+### Changed
+
+- Documentation: split runner runbook into sub-docs (GH#34822) (#34823)
+
+### Fixed
+
+- make secret set write the active tenant and keep tenant-loader reads consistent
+- fix SCRIPT_DIR ordering in 5 helpers and add Coolify credential-registry discovery
+- walk PR closing-keyword args without array indexing for zsh nounset (#34831)
+- fix verified handoff audit provenance for relative helper paths
+- add bounded coordinator inventory HTTP diagnostics
+- defer coordinator restore on invalid JSON with phase diagnostics (#34825)
+- record real receipt-lock holder PID and name holder on timeout (GH#34808) (#34818)
+- diagnose DinD registry mirrors (GH#34812) (#34815)
+- bound receipt reconciliation lock time (GH#34803) (#34804)
+
 ## [3.39.36] - 2026-10-16
 
 ### Changed
