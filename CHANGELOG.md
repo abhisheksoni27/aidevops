@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.41] - 2026-10-17
+
+### Added
+
+- GH#34929 audit legacy and project env credentials
+- detect credential hygiene failures and offer safe fixes (#34923)
+
+### Changed
+
+- Documentation: GH#34924 clarify ours and theirs during rebase (#34927)
+
 ## [3.39.40] - 2026-10-17
 
 ### Changed
