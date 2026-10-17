@@ -12,6 +12,7 @@ from subprocess import SubprocessError  # nosec B404
 from credential_findings import audit
 from credential_mcp import mcp_findings, migrate_outscraper
 from credential_process import run, trash_backend
+from credential_env import AUDITS as ENV_AUDITS, confirmed_permissions, findings as env_findings, fix_missing_links
 
 
 def describe(record):
@@ -32,7 +33,8 @@ def log_fix(scripts, category, names):
 def load_fix_records(scripts, helper):
     records = []
     for args in (helper + ['audit-credentials'],
-                 ['bash', str(scripts / 'secret-hygiene-helper.sh'), 'audit-mcp']):
+                 ['bash', str(scripts / 'secret-hygiene-helper.sh'), 'audit-mcp'],
+                 ['python3', str(scripts / 'credential_audit.py'), 'mcp-env']):
         # Each backend operation is individually bounded. The complete audit
         # can legitimately take more than one backend's five-second timeout.
         result = run(args, timeout=120)
@@ -120,7 +122,8 @@ def fix(scripts):
     if any(r['category'] in ('mcp-unreadable', 'unreadable-source') for r in records):
         print('Incomplete audit; unreadable sources retained and no fixes applied.', file=sys.stderr)
         return 1
-    fix_permissions(records, scripts)
+    fix_permissions(confirmed_permissions(records, confirm), scripts)
+    fix_missing_links(records, confirm, lambda: log_fix(scripts, 'mcp-env-link', []))
     active = import_active(records, scripts, helper)
     prune_active(active, scripts, helper)
     trash_leftovers(records, scripts)
@@ -130,20 +133,28 @@ def fix(scripts):
     return 0
 
 
+def display(with_severity):
+    for line in sys.stdin:
+        record = json.loads(line)
+        # JSON quoting prevents control characters in config keys/paths becoming terminal commands.
+        location = json.dumps(record['file'], ensure_ascii=True) + ':' + str(record['line'])
+        detail = json.dumps({k: v for k, v in record.items() if k not in ('file', 'line')})
+        # display-env prepends the severity column consumed by secret-hygiene-helper.sh.
+        columns = [record.get('severity', 'medium'), location, detail][int(not with_severity):]
+        print('\t'.join(columns))
+
+
 def main():
     command, *args = sys.argv[1:]
     if command == 'audit':
         helper, loader, active, *files = args
         records = (dict(record, active=record['file'] == active) for record in audit(files, loader, helper))
+    elif command in ENV_AUDITS:
+        records = env_findings(command, Path.home(), Path(__file__).parent / 'secret-helper.sh')
     elif command == 'mcp':
         records = (record for path in args for record in mcp_findings(path))
-    elif command == 'display':
-        for line in sys.stdin:
-            record = json.loads(line)
-            # JSON quoting prevents control characters in config keys/paths becoming terminal commands.
-            location = json.dumps(record['file'], ensure_ascii=True) + ':' + str(record['line'])
-            detail = json.dumps({k: v for k, v in record.items() if k not in ('file', 'line')})
-            print(location + '\t' + detail)
+    elif command in ('display', 'display-env'):
+        display(command == 'display-env')
         return
     elif command == 'fix':
         try:
