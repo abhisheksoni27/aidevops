@@ -42,6 +42,9 @@
 #                              counter, the TODO.md seed), then exits without
 #                              allocating. Use when resolve_implicit_counter_branch
 #                              refused a stale dedicated branch.
+#   --repair-counter-branch    Repair only a stale default-branch config pin to
+#                              a validated leading dedicated branch. Preserves
+#                              other keys, mode and owner; no allocation/push.
 #   --skip-label-validation    Skip pre-flight label existence check (useful for
 #                              bulk --count N allocation or when gh is rate-limited)
 #   --no-blocked-by            Suppress auto-detection of predecessor references
@@ -171,6 +174,7 @@ NO_BLOCKED_BY=false
 # GH#33152: explicit, audited fast-forward counter-branch catch-up instead of
 # a normal allocation. See _main_sync_counter_branch / sync_counter_branch.
 SYNC_COUNTER_BRANCH=false
+REPAIR_COUNTER_BRANCH=false
 TASK_TITLE=""
 TASK_DESCRIPTION=""
 TASK_LABELS=""
@@ -390,6 +394,10 @@ parse_args() {
 			SYNC_COUNTER_BRANCH=true
 			shift
 			;;
+		--repair-counter-branch)
+			REPAIR_COUNTER_BRANCH=true
+			shift
+			;;
 		--help)
 			grep '^#' "$0" | grep -v '#!/usr/bin/env' | sed 's/^# //' | sed 's/^#//'
 			exit 0
@@ -423,8 +431,8 @@ _validate_and_normalize_args() {
 		exit 1
 	fi
 
-	# Title is required unless batch mode or a no-allocation --sync-counter-branch run
-	if [[ -z "$TASK_TITLE" ]] && [[ "$ALLOC_COUNT" -eq 1 ]] && [[ "$SYNC_COUNTER_BRANCH" != "true" ]]; then
+	# Maintenance actions never allocate, so do not require a task title.
+	if [[ -z "$TASK_TITLE" && "$ALLOC_COUNT" -eq 1 && "$SYNC_COUNTER_BRANCH" != "true" && "$REPAIR_COUNTER_BRANCH" != "true" ]]; then
 		log_error "Missing required argument: --title (or use --count N for bulk allocation)"
 		exit 1
 	fi
@@ -1170,6 +1178,15 @@ _main_sync_counter_branch() {
 	local repo_path="$1"
 	local target_branch="$COUNTER_BRANCH"
 
+	if [[ "$REPAIR_COUNTER_BRANCH" == "true" ]]; then
+		if [[ "$SYNC_COUNTER_BRANCH" == "true" || "$OFFLINE_MODE" == "true" || "$DRY_RUN" == "true" ]]; then
+			log_error "--repair-counter-branch cannot be combined with sync, offline or dry-run"
+			return 1
+		fi
+		repair_counter_branch_config "$repo_path"
+		return $?
+	fi
+
 	if [[ "${_COUNTER_BRANCH_SET:-false}" == "false" ]]; then
 		target_branch="${AIDEVOPS_DEDICATED_COUNTER_BRANCH:-task-id-counter}"
 	fi
@@ -1854,6 +1871,7 @@ _warn_dispatch_path_auto_dispatch() {
 _main_handle_namespaced_mode() {
 	_CLAIM_NAMESPACED_HANDLED=false
 	_CLAIM_NAMESPACED_RC=0
+	[[ "$REPAIR_COUNTER_BRANCH" != "true" ]] || return 0
 	[[ "${AIDEVOPS_TASK_COORDINATOR_MODE:-legacy}" == "namespaced" ]] || return 0
 	_CLAIM_NAMESPACED_HANDLED=true
 
@@ -2021,7 +2039,7 @@ main() {
 	[[ $counter_setup_rc -eq 0 ]] || return "$counter_setup_rc"
 	_claim_apply_detected_default_branch
 
-	if [[ "$SYNC_COUNTER_BRANCH" == "true" ]]; then
+	if [[ "$SYNC_COUNTER_BRANCH" == "true" || "$REPAIR_COUNTER_BRANCH" == "true" ]]; then
 		_main_sync_counter_branch "$REPO_PATH"
 		return $?
 	fi
