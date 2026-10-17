@@ -118,6 +118,9 @@ re-arm it. The owner reviews and records a corrected brief or a precise human-on
 decision. Never silently clear a hold or restart from a replacement PR. The
 corrected brief is the whole action: the recovery owner returns the issue to
 `status:available` (see "Terminal-blocker recovery" below).
+After syncing the corrected brief into the issue body, start the revision notice
+with `Brief repaired:` so consolidation does not count the already-integrated
+decision as an unmerged scope comment.
 
 This delegation covers implementation choices, not credentials, runtime
 permissions, new expenditure, destructive/external actions, publication, trust
