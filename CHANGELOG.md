@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.38] - 2026-10-17
+
+### Added
+
+- WordPress change plans with dry run, backup, read-back and restore
+- browser-qa screenshot colour-scheme, scroll-to, measurement and label options
+- flag source of SCRIPT_DIR before assignment in shell-init-pattern-check (#34836)
+
+### Changed
+
+- Maintenance: mark t18706 complete (pr:#34865 completed:2026-10-17) (#34866)
+- Maintenance: sync GitHub issue refs to TODO.md (#34868)
+- Documentation: document dynamic-scope fixture shadowing (#34859)
+
+### Fixed
+
+- preserve caller runner without registry override (#34874)
+- detach agent routines and recover dead runners (#34869)
+- strip BSD wc padding in consolidation call-budget test
+- make tenant secret migration resolvable and plaintext pruning safe (#34855)
+- project truthful blocked-exit state and re-arm first-observation holds on revision
+- clearer reason for unquoted braces in command policy parser (#34850)
+- address timeout setter quality findings (#34847)
+- bind Pulse cleanup to rootless descendant lifetime
+- reconcile already-merged release-provenance PR in full-loop merge (#34842)
+- escape angle-bracket tokens in generated CHANGELOG entries (#34841)
+- read Coolify add-context token from a named secret, not argv (#34840)
+
 ## [3.39.37] - 2026-10-16
 
 ### Added
