@@ -877,12 +877,24 @@ _dps_rebase_in_ephemeral() {
 		return 1
 	fi
 
+	# `union` is a gitattributes merge driver, not a -X strategy option. Apply it
+	# to TODO.md only, for this rebase only, via a temp core.attributesFile so
+	# the shared info/attributes (common dir) is never modified. Precedence: an
+	# in-tree .gitattributes `merge` attribute for TODO.md would override this.
+	local attrs_file
+	attrs_file=$(mktemp -t "dirty-pr-sweep-attrs.XXXXXX") || attrs_file=""
 	local rebase_ok=1
-	if git -C "$ephemeral" rebase -X union "origin/${default_branch}" >/dev/null 2>&1; then
-		rebase_ok=0
+	if [[ -n "$attrs_file" ]]; then
+		printf '%s\n' 'TODO.md merge=union' >"$attrs_file"
+		if git -c "core.attributesFile=${attrs_file}" -C "$ephemeral" rebase "origin/${default_branch}" >/dev/null 2>&1; then
+			rebase_ok=0
+		else
+			git -C "$ephemeral" rebase --abort >/dev/null 2>&1 || true
+			_dps_log "PR #$pr_number ($repo_slug): rebase with TODO.md union driver failed — conflicts outside TODO.md"
+		fi
+		rm -f "$attrs_file" 2>/dev/null || true
 	else
-		git -C "$ephemeral" rebase --abort >/dev/null 2>&1 || true
-		_dps_log "PR #$pr_number ($repo_slug): rebase -X union failed — conflicts outside TODO.md"
+		_dps_log "PR #$pr_number ($repo_slug): mktemp for attributes failed — skipping rebase"
 	fi
 
 	if [[ "$rebase_ok" -eq 0 ]]; then
@@ -926,7 +938,7 @@ _dps_rebase_post_comment() {
 	local key="$5"
 
 	local comment_body
-	comment_body="**Auto-rebase**: this PR was DIRTY with only \`TODO.md\` conflicting, so the pulse rebased it onto \`origin/${default_branch}\` with the \`union\` merge strategy and force-pushed.
+	comment_body="**Auto-rebase**: this PR was DIRTY with only \`TODO.md\` conflicting, so the pulse rebased it onto \`origin/${default_branch}\` with the \`union\` merge driver (TODO.md only) and force-pushed.
 
 - If CI now passes, the merge pass will take it from here.
 - If this rebase was wrong, revert with \`git push --force-with-lease origin ${head_ref}\` from your local copy.

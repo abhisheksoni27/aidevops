@@ -638,6 +638,62 @@ fi
 export PATH="$PATH_ORIG"
 
 # =============================================================================
+# Ephemeral rebase: TODO.md union driver (GH#34947)
+# =============================================================================
+
+_rebase_fixture() {
+	local name="$1" extra_conflict="$2"
+	local base="${TEST_ROOT}/rb-${name}"
+	local gitq=(git -c user.email=t@example.com -c user.name=t -c commit.gpgsign=false)
+	mkdir -p "$base"
+	git init -q --bare -b main "${base}/origin.git"
+	git clone -q "${base}/origin.git" "${base}/work" 2>/dev/null
+	(
+		cd "${base}/work" || exit 1
+		printf 'a\n' >TODO.md
+		printf 'x\n' >other.txt
+		"${gitq[@]}" add -A && "${gitq[@]}" commit -qm base && git push -q origin HEAD:main
+		git checkout -q -b pr
+		printf 'a\npr-line\n' >TODO.md
+		[[ "$extra_conflict" == "1" ]] && printf 'pr\n' >other.txt
+		"${gitq[@]}" commit -qam pr && git push -q origin pr
+		git checkout -q main
+		printf 'a\nmain-line\n' >TODO.md
+		[[ "$extra_conflict" == "1" ]] && printf 'main\n' >other.txt
+		"${gitq[@]}" commit -qam main && git push -q origin main
+	) >/dev/null 2>&1
+	return 0
+}
+
+for rb_case in clean conflict; do
+	rb_extra=0
+	[[ "$rb_case" == "conflict" ]] && rb_extra=1
+	_rebase_fixture "$rb_case" "$rb_extra"
+	rb_work="${TEST_ROOT}/rb-${rb_case}/work"
+	rb_rc=0
+	(
+		export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+		_dps_rebase_in_ephemeral 1 "test/repo" "$rb_work" "pr" "main"
+	) >/dev/null 2>&1 || rb_rc=$?
+	rb_todo=$(git -C "${TEST_ROOT}/rb-${rb_case}/origin.git" show pr:TODO.md 2>/dev/null || true)
+	rb_leftover=$(git -C "$rb_work" branch --list 'dirty-pr-sweep/*' | wc -l | tr -d ' ')
+	rb_wt=$(git -C "$rb_work" worktree list | wc -l | tr -d ' ')
+	if [[ "$rb_case" == "clean" ]]; then
+		if [[ "$rb_rc" -eq 0 ]] && grep -q 'pr-line' <<<"$rb_todo" && grep -q 'main-line' <<<"$rb_todo"; then
+			print_result "ephemeral rebase: TODO.md-only conflict resolved via union driver and pushed" 0
+		else
+			print_result "ephemeral rebase: TODO.md-only conflict resolved via union driver and pushed" 1 "rc=${rb_rc}; todo=${rb_todo}"
+		fi
+	else
+		if [[ "$rb_rc" -eq 1 && "$rb_leftover" == "0" && "$rb_wt" == "1" ]] && ! grep -q 'main-line' <<<"$rb_todo"; then
+			print_result "ephemeral rebase: conflict in non-TODO file fails with no leftovers" 0
+		else
+			print_result "ephemeral rebase: conflict in non-TODO file fails with no leftovers" 1 "rc=${rb_rc}; branches=${rb_leftover}; worktrees=${rb_wt}"
+		fi
+	fi
+done
+
+# =============================================================================
 # Summary
 # =============================================================================
 
