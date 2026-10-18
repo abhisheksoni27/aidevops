@@ -453,9 +453,9 @@
   // ---------------------------------------------------------------------------
   // storage — Worktree archive candidacy and compact-archive retention
   // ---------------------------------------------------------------------------
-  // Thresholds are hours of confirmed idle (worktree .git, admin HEAD and HEAD
-  // reflog all older than the window) before guarded Pulse cleanup may make a
-  // verified compact archive and remove the full worktree. They never bypass
+  // Thresholds are hours of boot-scoped, registry-confirmed idle before guarded
+  // Pulse cleanup may restore-verify a self-contained archive and remove the
+  // full worktree. Git metadata age alone is not authority. They never bypass
   // owner, open-PR, process, lock, preservation-marker or archive-verification
   // guards. Minimum 24; smaller or malformed values use the shipped default.
   "storage": {

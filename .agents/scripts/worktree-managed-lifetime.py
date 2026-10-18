@@ -22,6 +22,9 @@ import sys
 import time
 import uuid
 
+import worktree_lifetime_idle as idle_policy
+import worktree_lifetime_proof as lifetime_proof
+
 
 TABLE = "worktree_managed_lifetimes"
 
@@ -78,6 +81,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             BEGIN SELECT RAISE(ABORT, 'managed worktree sealed for cleanup'); END""",
     ):
         connection.execute(statement)
+    idle_policy.initialize(connection)
 
 
 def load(connection: sqlite3.Connection, path: str) -> dict:
@@ -133,6 +137,7 @@ def reserve(record: dict, unit: str) -> None:
     if record["launches"]:
         drain(record["launches"][-1])
     require(re.fullmatch(r"aidevops-worker-[A-Za-z0-9_-]+", unit) is not None, "invalid unit name")
+    idle_policy.invalidate(record)
     record["launches"].append({"unit": unit, "boot_id": boot_id(), "invocation": None})
     record["state"] = "reserved"
 
@@ -147,6 +152,7 @@ def bind(record: dict) -> None:
             "worker does not own unit invocation")
     require(launch["boot_id"] == boot_id() and bool(snapshot.get("ControlGroup")), "missing cgroup identity")
     launch.update(invocation=invocation, cgroup=snapshot["ControlGroup"])
+    idle_policy.invalidate(record)
     record["state"] = "running"
 
 
@@ -191,39 +197,28 @@ def seal(record: dict) -> None:
     record.update(state="sealed", sealed_at=time.time())
 
 
-def proof(record: dict, source_inode: str) -> None:
-    require(record["state"] == "sealed" and record["identity"]["source_inode"] == source_inode,
-            "no matching sealed generation")
-    require(record.get("sealed_at", 0) > 0, "missing sealing receipt")
-    if not record["launches"]:
-        require(record.get("admission_cancelled") is True, "missing admission cancellation")
-    for launch in record["launches"]:
-        if launch.get("admission_cancelled") is True:
-            require(launch["invocation"] is None, "admitted work cannot be cancelled")
-            continue
-        snapshot = launch.get("quiescence", {})
-        require(snapshot.get("InvocationID") == launch["invocation"] and bool(launch["invocation"]),
-                "invalid receipt invocation")
-        require(snapshot.get("MainPID") == "0" and not snapshot.get("Job"), "receipt has pending work")
-        require(snapshot.get("ExitType") == "cgroup" and snapshot.get("RemainAfterExit") == "yes"
-                and snapshot.get("Restart") == "no", "invalid receipt lifetime contract")
-        require((snapshot.get("ActiveState"), snapshot.get("SubState")) in
-                (("active", "exited"), ("failed", "failed")), "invalid descendant receipt")
+proof = lifetime_proof.proof
 
 
-def inspect_record(record: dict, path: Path, operation: str, extra: list[str]) -> None:
+def idle_quiescence(record: dict) -> None:
+    idle_policy.quiescence(record, boot_id, drain, seal)
+
+
+def inspect_record(record: dict, path: Path, operation: str, extra: list[str], connection=None) -> None:
     if operation == "status":
         print(json.dumps(record, sort_keys=True))
         return
     if operation == "proof":
-        require(len(extra) <= 1, "invalid source identity")
-        if not extra:
-            verify_identity(record, path)
-        proof(record, extra[0] if extra else inode(path))
+        lifetime_proof.inspect(record, path, extra, connection, verify_identity)
         return
     verify_identity(record, path)
-    if operation == "cleanup-ready":
+    if operation in ("cleanup-ready", "idle-ready"):
         # Dry-run only: do not persist a seal before policy and owner checks.
+        if operation == "idle-ready":
+            require(len(extra) <= 1, "at most one idle window is accepted")
+            idle_policy.owner_clear(connection, str(path))
+            idle_policy.require_elapsed(record, boot_id(), int(extra[0]) if extra else idle_policy.IDLE_SECONDS)
+            idle_quiescence(record)
         seal(record)
         return
     require(record["state"] in ("created", "running"), "worktree cannot be reused")
@@ -231,7 +226,19 @@ def inspect_record(record: dict, path: Path, operation: str, extra: list[str]) -
         drain(record["launches"][-1])
 
 
-def mutate_record(record: dict, path: Path, operation: str, extra: list[str]) -> None:
+def observe_idle(connection, record: dict) -> None:
+    try:
+        idle_policy.observe(connection, record, boot_id(), idle_quiescence)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        # The failed observation is evidence too. Persist invalidation under the
+        # same writer lock rather than rolling back to a previously valid window.
+        idle_policy.invalidate(record)
+        save(connection, record)
+        connection.execute("COMMIT")
+        raise
+
+
+def mutate_record(record: dict, path: Path, operation: str, extra: list[str], connection=None) -> None:
     verify_identity(record, path)
     if operation == "reserve":
         require(len(extra) == 1, "unit required")
@@ -239,13 +246,21 @@ def mutate_record(record: dict, path: Path, operation: str, extra: list[str]) ->
     elif operation == "bind-exec":
         require(bool(extra), "worker command required")
         bind(record)
+    elif operation == "observe-idle":
+        observe_idle(connection, record)
     else:
+        if operation == "seal-idle":
+            require(len(extra) <= 1, "at most one idle window is accepted")
+            idle_policy.owner_clear(connection, str(path))
+            idle_policy.require_elapsed(record, boot_id(), int(extra[0]) if extra else idle_policy.IDLE_SECONDS)
+            idle_quiescence(record)
         seal(record)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("enroll", "reserve", "bind-exec", "seal", "proof", "status", "ready", "cleanup-ready"))
+    parser.add_argument("operation", choices=("enroll", "reserve", "bind-exec", "seal", "proof", "status", "ready", "cleanup-ready",
+                                             "observe-idle", "idle-ready", "seal-idle"))
     parser.add_argument("path")
     parser.add_argument("extra", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -255,19 +270,20 @@ def main() -> int:
     try:
         require(path.is_absolute() and str(path) == os.path.realpath(path), "canonical absolute path required")
         require(Path(db).is_file() and not Path(db).is_symlink(), "registry unavailable")
-        readonly = args.operation in ("proof", "status", "ready", "cleanup-ready")
+        readonly = args.operation in ("proof", "status", "ready", "cleanup-ready", "idle-ready")
         uri = Path(db).resolve().as_uri() + ("?mode=ro" if readonly else "?mode=rw")
         with closing(sqlite3.connect(uri, uri=True, timeout=10, isolation_level=None)) as connection:
             connection.execute("BEGIN" if readonly else "BEGIN IMMEDIATE")
-            if args.operation == "enroll":
+            if not readonly:
                 initialize(connection)
+            if args.operation == "enroll":
                 enroll(connection, path)
             else:
                 record = load(connection, str(path))
                 if readonly:
-                    inspect_record(record, path, args.operation, args.extra)
+                    inspect_record(record, path, args.operation, args.extra, connection)
                 else:
-                    mutate_record(record, path, args.operation, args.extra)
+                    mutate_record(record, path, args.operation, args.extra, connection)
                     save(connection, record)
             connection.execute("COMMIT")
         # Do not stop units by name after sampling: systemd has no atomic

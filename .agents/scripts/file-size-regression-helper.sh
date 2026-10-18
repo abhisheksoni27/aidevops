@@ -519,7 +519,7 @@ cmd_scan_ref() {
 	fi
 
 	local _result
-	_result=$(scan_violations_ref "$_ref" "$_limit")
+	_result=$(scan_violations_ref "$_ref" "$_limit") || die "scan-ref: object scan failed"
 	if [ -n "$_output" ]; then
 		printf '%s\n' "$_result" > "$_output"
 	else
@@ -688,7 +688,7 @@ cmd_check_scan_head() {
 		_repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || _repo_root="."
 		scan_violations_tracked_worktree "$_repo_root" "$_limit" > "$_head_tsv" 2>/dev/null || true
 	else
-		scan_violations_ref "$_head_ref" "$_limit" > "$_head_tsv" 2>/dev/null || true
+		scan_violations_ref "$_head_ref" "$_limit" > "$_head_tsv" || return 1
 	fi
 	return 0
 }
@@ -774,9 +774,9 @@ cmd_check() {
 	_head_sha=$(git rev-parse --short "$FILE_SIZE_CHECK_HEAD_REF" 2>/dev/null) || _head_sha="$FILE_SIZE_CHECK_HEAD_REF"
 	log "comparing refs: base=${_base_ref} (${_base_sha}) head=${FILE_SIZE_CHECK_HEAD_REF} (${_head_sha})"
 	log "scanning base ($_base_sha)"
-	scan_violations_ref "$_comparison_base_ref" "$FILE_SIZE_CHECK_LIMIT" > "$_base_tsv" 2>/dev/null || true
+	scan_violations_ref "$_comparison_base_ref" "$FILE_SIZE_CHECK_LIMIT" > "$_base_tsv" || die "check: base object scan failed"
 	log "scanning head ($_head_sha)"
-	cmd_check_scan_head "$FILE_SIZE_CHECK_HEAD_REF" "$FILE_SIZE_CHECK_LIMIT" "$_head_tsv"
+	cmd_check_scan_head "$FILE_SIZE_CHECK_HEAD_REF" "$FILE_SIZE_CHECK_LIMIT" "$_head_tsv" || die "check: head object scan failed"
 	cmd_check_run_diff "$_base_tsv" "$_head_tsv" "$_base_sha" "$_head_sha" \
 		"$FILE_SIZE_CHECK_OUTPUT_MD" "$FILE_SIZE_CHECK_ALLOW_INCREASE"
 	return $?

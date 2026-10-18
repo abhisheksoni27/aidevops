@@ -63,13 +63,16 @@ local commits, dirty patches, bounded untracked state, and available failure
 context remain restorable. Audit rows use `mode=compact-archive`, and async
 cleanup reports removed, archived, and failed-archive totals.
 
-Unattributed worktrees with no open head PR are retained for 14 days of
-confirmed idle by default before verified compact archival and removal. Their
+Ordinary managed worktrees require at least 24 hours of confirmed idle; the shipped
+class defaults remain 7 or 14 days. Independent restore verification precedes
+guarded removal. Unattributed
 archives are stored under an `unattributed` target rather than being falsely
 assigned to an issue or PR.
 
-Archive candidacy windows count confirmed idle time: the newest of the worktree
-`.git`, admin `HEAD` and HEAD reflog mtimes; missing evidence preserves. Set them
+Archive candidacy requires boot- and generation-bound observations in the existing
+ownership registry: both wall and monotonic time must reach the interval. Owner
+changes invalidate idle; Git mtimes alone cannot authorize removal. Missing or
+unsupported evidence preserves the source. Configure longer windows
 in `~/.config/aidevops/config.jsonc` (hours, minimum 24) or with the environment
 overrides, which take precedence:
 
@@ -84,6 +87,10 @@ Malformed or sub-24-hour values fall back to the default. A shorter window only
 makes a worktree an archive candidate sooner; owner, open-PR, process, lock,
 preservation-marker and archive-verification guards still decide removal, and
 compact-archive expiry stays in `dry-run` unless separately enabled.
+Each attempt captures its configured window at entry; overlapping classes use the
+longest applicable window. A later attempt requesting a window larger than the
+archive operation's authorization retains source and recovery for a new
+preservation decision; the older receipt cannot silently satisfy stricter policy.
 
 Full worktrees remain required for live owners/sessions/processes, recent worker
 metrics, security or forensics markers/labels, repeated zero-session failures,

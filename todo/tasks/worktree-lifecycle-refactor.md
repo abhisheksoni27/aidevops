@@ -1,12 +1,205 @@
+# Worktree lifecycle reliability
+
+This document preserves two historical implementation checkpoints: the managed
+idle/archive extension and upstream `b6148211e`. Their test results apply to those
+snapshots, not the combined implementation. Integration and exact-head verification
+remain in progress; neither checkpoint establishes deployment or final completion.
+
+## Objective and authority
+
+Interactive implementation through verified PR merge. No release requested.
+All execution and verification must be rootless: no sudo, system services,
+privileged process inspection, or requirement to change host permissions.
+User-approved ordinary worktree archive threshold: 24 hours of confirmed idle,
+not creation age. Open PRs, live owners and preservation markers remain protected.
+Archive expiry (30 days / 50 GiB discussed) is not enabled by this work.
+Unknown legacy data must not be deleted just because its path is under /tmp.
+
+## Independent review incorporated
+
+- Reuse existing ownership SQLite and managed lifetime admission fences; do not
+  introduce a parallel lease registry or a second supervisor.
+- Inventory producers. Remove unnecessary checkouts before adding lifecycle code.
+- Persist creation intent before creating real resources, then bind actual path,
+  inode, administrative directory and common repository identities.
+- Separate owner/admission state from resumable archive/removal operation phases.
+- A dead PID, elapsed age, detached HEAD or missing registry row is not authority.
+- Sealing is cooperative; it does not stop arbitrary same-user writers. Unknown
+  ownership or unavailable process evidence prevents destructive transitions.
+- Distinguish observed time from activity-event time; unknown activity is unknown.
+- Define supported recovery contents and protect unsupported states, including
+  unique ignored data, nested repositories, local LFS payloads and unfinished
+  Git operations unless full preservation is explicitly proven.
+- Verify archive recovery, source stability and durable receipts before removal.
+  Pin/retain prerequisite Git objects; do not mistake hashes for restore evidence.
+- Reconciliation must survive Pulse being stopped. Use user-level scheduling,
+  bounded runs, locks, observable last-success and explicit degraded states.
+- Capacity controls stop new allocations rather than overriding preservation.
+- Bound attempts, not unconditional deletion: unknown/protected data may remain.
+
+## Units, ownership, dependencies
+
+Primary interactive session owns implementation, verification and merge.
+Independent inference reviews supply advice only; no delegated implementation.
+
+1. **W1: producer removal** — `.agents/scripts/file-size-regression-helper.sh`
+   and its existing tests. Replace temporary worktree scans with Git-object reads;
+   preserve exclusion, root/nested size limits and failure semantics. Verify repeated
+   scans and interrupts cannot add worktree registrations or checkout directories.
+2. **W2: contract consolidation** — existing `worktree-managed-lifetime.py`,
+   ownership registry and creation/removal callers. Inventory exact producers,
+   map persisted states and add missing rootless intent/activity evidence. Depends W1.
+3. **W3: idle archival** — existing Pulse cleanup and archive helpers. Apply 24h
+   only to confirmed idle ordinary trees, with PR/owner/content guards. Record
+   durable archive/restore/removal evidence and idempotent recovery. Depends W2.
+4. **W4: reconciliation and reporting** — reuse existing cleanup routines and
+   user scheduling. Expose lifecycle, evidence source, last activity, protection,
+   failure, next attempt and sizes. Verify execution without Pulse. Depends W2/W3.
+5. **W5: rollout evidence** — read-only legacy inventory, then only individually
+   authorized and verified migration. Never infer legacy ownership from names.
+   Preserve unsupported cases, document gaps and do not claim them as cleaned.
+
+## Acceptance matrix
+
+- Ordinary user (nonzero uid); Linux/NixOS user systemd, Bash 3.2-compatible shell.
+- Repeated successful scans: unchanged Git worktree registry and no checkout dirs.
+- Errors, timeout, SIGTERM, SIGKILL at creation/archive/removal checkpoints.
+- Restart and reboot invalidate stale process proofs; no guessed quiescence.
+- Live descendants, late owner, PID reuse, simultaneous cleanup and changed paths.
+- Binary staged/unstaged changes, merge topology, executable modes, symlinks and
+  unusual filenames; unsupported Git states visibly protected.
+- Archive corruption, interrupted publication, missing prerequisites, concurrent GC,
+  source mutation, partial deletion and missing final receipt.
+- Registry unavailable/corrupt/locked, ENOSPC and clock changes fail closed.
+- Scheduler missing/stopped is observable; protected data cannot trigger forced expiry.
+- Exact-head local checks, independent safety review and remote CI before merge.
+
+## Evidence and progress
+
+- W1 scanner defect reproduced: `scan_violations_ref` installed a RETURN worktree
+  cleanup trap; nested `scan_violations_dir` replaced it. The repeated-scan test
+  failed before the change and passed after switching to Git object reads.
+- Checkout-free scanner committed as `ef4e14a34`. Its 10 tests pass, including
+  repeated scans, root/nested limits, explicit limit override, exclusions,
+  symlink exclusion and a missing ref. ShellCheck and Python compilation pass.
+- Observed existing temporary detached worktrees and stale prunable registrations.
+  Neither observation is deletion authorization.
+- Independent architecture review completed; destructive rollout requires the
+  safety/coverage refinements above, not a promise of universally perfect cleanup.
+- Implementation environment reports uid 1000. Rootless remains an acceptance gate.
+
+### W2 foundation implemented, not connected to automatic removal
+
+- `worktree_lifetime_idle.py` stores a versioned idle observation inside the
+  existing managed-lifetime record, using boot ID, generation, ownership epoch,
+  wall time and monotonic time. Both elapsed clocks must reach 24 hours.
+- `observe-idle` confirms managed descendant quiescence without sealing; failed
+  observations durably invalidate previous evidence. `idle-ready` is advisory.
+  `seal-idle` rechecks ownership, interval and quiescence in a writer transaction.
+- Ownership insert/update/delete triggers reset idle even for sealed records.
+  Reservation and binding also invalidate idle. Pending admission, live or
+  inaccessible owners, corrupt timestamps and stale boot evidence fail closed.
+- Independent safety review found rollback preserving old idle, sealed-owner
+  mutation exemptions and missing readiness ownership checks. All three were
+  fixed and covered by focused regression tests.
+- `AIDEVOPS_TEST_SYSTEMD=1 python3 .agents/scripts/tests/test-worktree-managed-lifetime.py`
+  passed 20 tests without skips at UID 1000, including real user-systemd child
+  lifetime, guard, archive/native removal and rejection of premature idle expiry.
+  This exercises the existing full-copy recovery path, NOT a new compact archive
+  restore verifier or the still-unimplemented idle cleanup integration.
+
+### Initial producer inventory and next safe action
+
+Literal production call-site search (`git grep 'worktree[[:space:]]+add'`)
+identified remaining checkout producers. This is not a complete dynamic-call audit:
+
+- Temporary analysis: `complexity-regression-helper.sh`,
+  `markdownlint-diff-helper.sh` and review bootstrap paths.
+- Publication/maintenance: release aggregate/reconcile helpers, profile README,
+  shared TODO commits, workflow sync, skill update and branch cleanup helpers.
+- Worker/interactive creation: `worktree-helper-add.sh`, dirty-PR sweep,
+  quality-debt, repository initialization and WordPress plugin creation.
+- Recovery: `worktree-archive-helper.sh restore` creates a real linked worktree.
+
+Continue by tracing creation intent and cleanup ownership for these producers,
+then integrate idle eligibility into ordinary cleanup without age-based fallback.
+Do not connect deletion until archive restore verification, source revalidation
+and generation-bound cleanup authorization are implemented. Cleanup ownership
+itself invalidates idle, so a separate durable operation receipt is necessary;
+generic `proof` or an old `seal` is not 24-hour idle authorization. W3–W5,
+independent final review, remote CI and merge remain outstanding. No archive
+expiry, legacy deletion or deployment has been enabled by these changes.
+
+### W3 integration and local verification (2026-10-17)
+
+- Ordinary cleanup now routes through confirmed idle and a generation-bound
+  archive operation; missing evidence cannot fall back to directory age. Terminal
+  issue/PR cleanup keeps its separate existing policy path.
+- Self-contained bundles restore independently of the source repository. The
+  controller compares source/restored snapshots, fsyncs recovery artifacts and
+  directory ancestry, and commits the restore receipt before native deletion.
+- Interrupted construction retains one operation rather than allocating another
+  copy. Verified scratch cleanup is resumable; successful native removal records
+  the final receipt. Source mutation and late owners reject removal.
+- Independent review prompted intent-to-add rejection, binding the receipt to the
+  manifest digest observed before restoration, and an ownership check for `ready`.
+- After archive creation, ordinary removal rechecks remote PR state without the
+  PR list/view caches and rechecks preservation policy. A newly opened PR retains
+  both source and verified archive.
+- Capacity estimation now includes expanded HEAD/index, working files and Git
+  objects, with conservative overhead and a 1 GiB reserve. Its regression confirms
+  that insufficient space for untracked payloads prevents reservation.
+- Rootless shell fixtures isolate process visibility only where testing branch
+  policy/removal mechanics. Real degraded visibility remains protected; the native
+  managed-lifetime suite still exercises user-systemd. Unregister fixtures now use
+  their own registry and test the approved-removal primitive instead of assuming
+  old age alone authorizes deletion. Dirty-content checks verify retained payload.
+
+Observed checks at UID 1000:
+
+- `test-pulse-cleanup-worker-owned-no-pr.sh`: 39/39.
+- `test-worktree-archive-lifecycle.py`: 22/22 after capacity and late-PR fixes.
+- `AIDEVOPS_TEST_SYSTEMD=1 ...test-worktree-managed-lifetime.py`: 20/20, no skips.
+- `test-worktree-archive-helper.sh`: 7/7; checkout-free scanner suite: 10/10.
+- `test-pulse-cleanup-preserves-dirty.sh`: 5/5.
+- `test-pulse-cleanup-unregister.sh` and `test-pulse-cleanup-non-git-cwd.sh`: passed.
+- `test-cleanup-worktrees-async.sh`: 32/32.
+- Subsequent receipt/capacity follow-up: 3/3 focused tests passed. A missing common
+  repository no longer permits completion of a removal receipt; restoring its
+  availability permits reconciliation. Reusing verified recovery no longer
+  requires the free-space budget for allocating a fresh archive. The complete
+  archive suite now contains 23 tests and needs its final aggregate rerun.
+- Scoped ShellCheck, Python compilation and diff whitespace checks passed.
+- NixOS shell fixtures use `AIDEVOPS_TEST_GIT_BIN=/run/current-system/sw/bin/git`;
+  the hard-coded `/usr/bin/git` default is unavailable on this verification host.
+
+### Remaining acceptance work and continuation
+
+This is not completion of issue #34905. W3 changes remain uncommitted; no new PR,
+merge, deployment, legacy deletion or expiry activation has occurred.
+
+1. Complete W2 producer/admission tracing; the literal inventory above is not proof
+   that every producer has durable creation intent.
+2. Implement W4 using the existing asynchronous cleanup lock/routines and generic
+   user scheduler, not another supervisor. Report managed operation phases and
+   hidden lifecycle archive locations, space, protected/unknown states and failures.
+3. Wire the verified `finish_removal` boundary into bounded reconciliation of
+   interrupted final receipts. Unavailable parents/common repositories remain
+   protected. Keep status observation separate from authorization; recorded idle
+   is not fresh process evidence and a successful report is not cleanup completion.
+4. Finish the interruption/reboot/concurrency acceptance matrix, remaining scoped
+   cleanup regressions and an independent final review of all deletion paths.
+5. Reconcile with current upstream, run exact-head required checks and remote CI,
+   then deliver through the agreed PR lifecycle. W5 remains read-only until each
+   legacy migration has demonstrated safety; existing inventory is not authority.
 <!-- SPDX-License-Identifier: MIT -->
 <!-- SPDX-FileCopyrightText: 2025-2026 Marcus Quinn -->
 
-# Worktree lifecycle: rootless, recoverable, guarded (GH#34943)
+## Upstream baseline: rootless, recoverable, guarded (GH#34943)
 
-Supersedes the plan cited by GH#34905, which never landed on any branch. This
-file records the lifecycle contract, proof requirements, producer inventory,
+The following upstream checkpoint records the lifecycle contract, proof requirements, producer inventory,
 recovery checks and verification evidence. Line references are navigation
-anchors; recheck them before editing.
+anchors at `b6148211e`; recheck them before editing.
 
 ## Contract
 
@@ -274,6 +467,29 @@ union` does not resolve TODO.md conflicts. `union` is a merge driver, not a
 strategy option, and no `merge=union` attribute applies, so the TODO-only
 auto-rebase never succeeds. Filed as GH#34947 (t18713).
 
-Delivered in #34948 (exact-head CI green). Outstanding: NixOS execution, a
-test for the `worktree-helper-add.sh` create→register window, and a dedicated
-boot-ID test.
+Delivered in #34948 (exact-head CI green). At that checkpoint, outstanding:
+NixOS execution, a `worktree-helper-add.sh` create→register test, and a boot-ID test.
+
+## Integration checkpoint (2026-10-18)
+
+- Extension commit `0b8c1c7ec` passed changed-file gates and commit hooks.
+- Before integrating upstream: archive helper 7/7, async cleanup 33/33,
+  archive lifecycle 26/26 passed at UID 1000 on NixOS.
+- Upstream integrated in `9a2cf1ded`, preserving checkout-free scanners and final
+  native-removal fingerprint checks. Merge hooks passed without bypasses.
+- Unknown administrative state and squash drafts now preserve the source. A
+  keyset cursor in the same registry prevents receipt starvation. Their regression
+  tests failed before repair; four focused checks then passed, including isolated
+  user-systemd unit generation and native archive/removal/restoration.
+- Maintainer decision `43f637d36` retains shipped 168/336-hour defaults; the operator
+  can configure a 24-hour floor. Both clocks enforce the longest applicable window. Stricter later
+  attempts preserve existing recovery rather than reusing weaker authorization.
+- Latest scoped checks: managed lifetime 21/21 with real user-systemd, worker
+  cleanup 40/40, dirty preservation 5/5, async cleanup 33/33, configured-window
+  integration 3/3. Defaults parse correctly; no local JSON Schema validator is
+  installed. Changed-file quality gates pass; full archive lifecycle passed 31/31.
+- Independent final advisory found no blocking issue in supplied policy propagation
+  and reconciliation paths; its scope excludes arbitrary same-user writers.
+- Producer gaps documented above remain protected, not claimed migrated. Exact-head
+  remote CI and PR delivery remain outstanding.
+- No expiry, legacy deletion, deployment, push or PR merge is claimed here.
