@@ -376,6 +376,51 @@ test_closed_issue_dirty_worktree_compacts_and_preserves_branch() {
 	return 0
 }
 
+# GH#34943: a late owner that writes after the compact archive was verified
+# must keep its worktree. The managed-lifetime probe override simulates that
+# write landing inside native removal, after its lock and common-dir probes
+# (the probe only runs there, so the archive itself is unaffected).
+test_late_write_after_compact_archive_preserves_worktree() {
+	local repo_dir="${TEST_ROOT}/repo-late-writer"
+	local wt_path="${TEST_ROOT}/worker-wt-late-writer"
+	local branch_name="feature/auto-20260507-190809-gh23089"
+	setup_repo_with_worker_worktree "$repo_dir" "$wt_path" "$branch_name" || return 1
+	printf 'dirty edit\n' >>"${wt_path}/worker.txt"
+	source_pulse_cleanup_with_stubs || return 1
+	gh() {
+		if [[ "${1:-}" == "issue" && "${2:-}" == "view" && "${3:-}" == "23089" ]]; then
+			printf '%s\n' "CLOSED"
+			return 0
+		fi
+		return 1
+	}
+	worktree_managed_require_removal_proof() {
+		local guarded_path="$1"
+		printf 'late owner write\n' >>"${guarded_path}/late-owner.txt"
+		return 0
+	}
+
+	local now_epoch
+	now_epoch=$(date +%s)
+	AIDEVOPS_HEADLESS_METRICS_FILE="${TEST_ROOT}/missing-late-writer-metrics.jsonl"
+	export AIDEVOPS_HEADLESS_METRICS_FILE
+
+	_cleanup_single_worktree "$repo_dir" "$wt_path" "$branch_name" "$now_epoch" "testowner/testrepo" "main" >/dev/null 2>&1
+	local cleanup_rc=$?
+
+	local branch_exists=1 rc=0
+	git -C "$repo_dir" rev-parse --verify "refs/heads/${branch_name}" >/dev/null 2>&1 && branch_exists=0
+	[[ "$cleanup_rc" -ne 0 ]] || rc=1
+	[[ -d "$wt_path" ]] || rc=1
+	[[ "$branch_exists" -eq 0 ]] || rc=1
+	grep -q 'late owner write' "${wt_path}/late-owner.txt" 2>/dev/null || rc=1
+	grep -q 'dirty edit' "${wt_path}/worker.txt" 2>/dev/null || rc=1
+	grep -q 'worktree-skipped.*compact-archive-source-changed' "$AIDEVOPS_CLEANUP_LOG" 2>/dev/null || rc=1
+	print_result "late write after compact archive preserves worktree" "$rc" \
+		"cleanup_rc=$cleanup_rc worktree_exists=$([[ -d "$wt_path" ]] && printf yes || printf no) branch_exists=$branch_exists pulse=$(cat "$LOGFILE" 2>/dev/null) log=$(cat "$AIDEVOPS_CLEANUP_LOG" 2>/dev/null)"
+	return 0
+}
+
 test_failed_compact_archive_preserves_dirty_worktree() {
 	local repo_dir="${TEST_ROOT}/repo-compact-failure"
 	local wt_path="${TEST_ROOT}/worker-wt-compact-failure"
@@ -936,6 +981,12 @@ test_stale_dirty_attributed_worker_archives_before_removal() {
 	setup_repo_with_worker_worktree "$repo_dir" "$wt_path" "$branch_name" "8 days ago" || return 1
 	git -C "$wt_path" reset -q --hard main || return 1
 	printf 'unfinished dirty worker state\n' >"$wt_path/unfinished.txt"
+	# The reset rewrites HEAD and its reflog, which is real idle-clock
+	# activity (GH#34905); restore the 8-day idle evidence afterwards.
+	local idle_stamp
+	idle_stamp=$(date -u -v-8d +%Y%m%d%H%M 2>/dev/null ||
+		date -u -d "8 days ago" +%Y%m%d%H%M) || return 1
+	backdate_worktree_activity "$wt_path" "$idle_stamp" || return 1
 	source_pulse_cleanup_with_stubs || return 1
 
 	local now_epoch
@@ -1274,8 +1325,18 @@ test_stale_profile_publication_intent_is_removed() {
 
 TEST_ROOT=$(mktemp -d)
 trap teardown EXIT
+# Git reports canonical worktree paths and the managed-lifetime fence refuses
+# any other form, so resolve macOS /var -> /private/var like production does.
+TEST_ROOT=$(cd "$TEST_ROOT" && pwd -P) || exit 1
 export HOME="${TEST_ROOT}/home"
 mkdir -p "${HOME}/.aidevops/logs"
+# Production always has an ownership registry; without one the managed
+# lifetime fence fails closed before any archive is attempted. A subshell
+# keeps the registry library from replacing this file's stubs.
+(
+	# shellcheck source=../shared-worktree-registry.sh
+	source "${SCRIPT_DIR}/../shared-worktree-registry.sh" && _init_registry_db
+) || exit 1
 
 echo "=== test-pulse-cleanup-worker-owned-no-pr.sh ==="
 test_recent_metric_blocks_local_commit_no_pr_removal
@@ -1288,6 +1349,7 @@ test_open_ci_repair_dirty_worktree_is_preserved
 test_open_head_pr_outranks_embedded_terminal_reference
 test_merged_branch_pr_removes_before_age_threshold
 test_closed_issue_dirty_worktree_compacts_and_preserves_branch
+test_late_write_after_compact_archive_preserves_worktree
 test_failed_compact_archive_preserves_dirty_worktree
 test_terminal_worktree_respects_live_owner_signal
 test_terminal_worktree_respects_recent_worker_metric
