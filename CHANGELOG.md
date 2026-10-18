@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.39.43] - 2026-10-18
+
+### Fixed
+
+- t18715 coolify-helper generate-ssh-configs writes private ~/.ssh/coolify_config instead of /tmp
+
 ## [3.39.42] - 2026-10-18
 
 ### Changed
