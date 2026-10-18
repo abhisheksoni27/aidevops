@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from subprocess import SubprocessError  # nosec B404
 
+from credential_chmod import fix_owned_permissions
 from credential_findings import audit
 from credential_mcp import mcp_findings, migrate_outscraper
 from credential_process import run, trash_backend
@@ -34,7 +35,8 @@ def load_fix_records(scripts, helper):
     records = []
     for args in (helper + ['audit-credentials'],
                  ['bash', str(scripts / 'secret-hygiene-helper.sh'), 'audit-mcp'],
-                 ['python3', str(scripts / 'credential_audit.py'), 'mcp-env']):
+                 ['python3', str(scripts / 'credential_audit.py'), 'mcp-env'],
+                 ['python3', str(scripts / 'credential_audit.py'), 'ssh-config']):
         # Each backend operation is individually bounded. The complete audit
         # can legitimately take more than one backend's five-second timeout.
         result = run(args, timeout=120)
@@ -46,19 +48,7 @@ def load_fix_records(scripts, helper):
 
 
 def fix_permissions(records, scripts):
-    for record in records:
-        if record['category'] != 'insecure-perms':
-            continue
-        # Never follow symlinks or change a foreign owner's file.
-        fd = os.open(record['file'], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        try:
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
-                continue
-            os.fchmod(fd, 0o600)
-        finally:
-            os.close(fd)
-        log_fix(scripts, 'insecure-perms', [])
+    fix_owned_permissions(records, lambda: log_fix(scripts, 'insecure-perms', []))
 
 
 def import_active(records, scripts, helper):
@@ -129,6 +119,8 @@ def fix(scripts):
     trash_leftovers(records, scripts)
     fix_mcp(records, scripts)
     print('Drift: choose explicitly with aidevops secret set NAME. Unparseable lines are unchanged.')
+    if any(r['category'].startswith('ssh-') for r in records):
+        print('SSH: add passphrases with ssh-keygen -p -f <key>; ~/.ssh mode and directives are report-only.')
     print('Import/prune operate on the active store only; review other tenants separately. No provider probes performed.')
     return 0
 
